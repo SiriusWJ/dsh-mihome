@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { createHash, createHmac, createCipheriv } from 'node:crypto'
 import {
   rc4,
+  rc4Drop1024,
   generateNonce,
   signedNonce,
   generateSignature,
@@ -22,6 +23,15 @@ describe('rc4', () => {
     const enc = rc4(key, data)
     // RC4 is self-inverse: re-running with the same key decrypts.
     expect(rc4(key, enc).toString('utf8')).toBe(data.toString('utf8'))
+  })
+
+  it('matches the Xiaomi RC4-drop-1024 vector (al-one init1024)', () => {
+    const key = Buffer.from('c2lnbmVkIG5vbmNlIGtleQ==', 'base64') // b64 of 'signed nonce key'
+    const out = rc4Drop1024(key, Buffer.from('米家 test 123', 'utf8'))
+    expect(out.toString('hex')).toBe('553c08d0c893a65278378ade8cf213')
+    // And the plain (no-drop) RC4 differs — the drop is load-bearing.
+    const plain = rc4(key, Buffer.from('米家 test 123', 'utf8'))
+    expect(plain.toString('hex')).not.toBe(out.toString('hex'))
   })
 })
 
@@ -47,13 +57,13 @@ describe('signedNonce', () => {
 })
 
 describe('generateSignature', () => {
-  it('matches the documented hmac-sha256 formula', () => {
+  it('matches the current hmac-sha256 formula (path + nonce + sorted pairs)', () => {
     const url = 'https://api.io.mi.com/app/miIO/raw_command'
     const signedNonce = Buffer.from('signed-nonce-key').toString('base64')
     const nonce = Buffer.from('nonce').toString('base64')
     const params = { data: '{"did":"d1"}' }
-    const parts = [url.split('com')[1], signedNonce, nonce]
-    for (const [k, v] of Object.entries(params)) parts.push(`${k}=${v}`)
+    const parts = [new URL(url).pathname, signedNonce, nonce]
+    for (const [k, v] of Object.entries(params).sort(([a], [b]) => a.localeCompare(b))) parts.push(`${k}=${v}`)
     const expected = createHmac('sha256', Buffer.from(signedNonce, 'base64'))
       .update(parts.join('&'))
       .digest('base64')
@@ -62,11 +72,13 @@ describe('generateSignature', () => {
 })
 
 describe('generateEncSignature', () => {
-  it('matches the documented sha1 formula (method + path + pairs + nonce)', () => {
+  it('matches the al-one sha1 formula (method + path + pairs + nonce)', () => {
     const url = 'https://de.api.io.mi.com/app/v2/home/home_device_list'
     const signedNonce = 'abc'
     const params = { data: '{}' }
-    const parts = ['POST', (url.split('com')[1] ?? '').replace('/app/', '/'), 'data={}', signedNonce]
+    const pathname = new URL(url).pathname
+    const path = pathname.startsWith('/app/') ? pathname.slice(4) : pathname
+    const parts = ['POST', path, 'data={}', signedNonce]
     const expected = createHash('sha1').update(parts.join('&'), 'utf8').digest('base64')
     expect(generateEncSignature(url, 'POST', signedNonce, params)).toBe(expected)
   })

@@ -1,4 +1,4 @@
-import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto'
+import { createHash, createHmac, randomBytes } from 'node:crypto'
 
 /**
  * Mi Home (米家) cloud client.
@@ -25,7 +25,7 @@ import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto'
 // Crypto helpers (RC4 is not exposed by Node's OpenSSL 3 default provider)
 // ---------------------------------------------------------------------------
 
-export function rc4(key: Buffer, data: Buffer): Buffer {
+function rc4Core(key: Buffer, data: Buffer, drop: number): Buffer {
   // KSA
   const s = new Uint8Array(256)
   for (let i = 0; i < 256; i++) s[i] = i
@@ -37,18 +37,35 @@ export function rc4(key: Buffer, data: Buffer): Buffer {
     s[j] = t
   }
   // PRGA
-  const out = Buffer.alloc(data.length)
   let i = 0
   j = 0
-  for (let k = 0; k < data.length; k++) {
+  const next = (): number => {
     i = (i + 1) & 0xff
     j = (j + s[i]!) & 0xff
     const t = s[i]!
     s[i] = s[j]!
     s[j] = t
-    out[k] = data[k]! ^ s[(s[i]! + s[j]!) & 0xff]!
+    return s[(s[i]! + s[j]!) & 0xff]!
   }
+  for (let k = 0; k < drop; k++) next()
+  const out = Buffer.alloc(data.length)
+  for (let k = 0; k < data.length; k++) out[k] = data[k]! ^ next()
   return out
+}
+
+/** Standard RC4 (test reference; classic vector compatibility). */
+export function rc4(key: Buffer, data: Buffer): Buffer {
+  return rc4Core(key, data, 0)
+}
+
+/**
+ * RC4 as used by Xiaomi's cloud channel: the first 1024 keystream bytes are
+ * discarded (RC4-drop-1024, matching `RC4.init1024()` from the actively
+ * maintained al-one/hass-xiaomi-miot implementation — the plain-ARC4 variant
+ * of the older extractors no longer decrypts current responses).
+ */
+export function rc4Drop1024(key: Buffer, data: Buffer): Buffer {
+  return rc4Core(key, data, 1024)
 }
 
 /** base64 of sha256(concat(a, b)). */
@@ -82,32 +99,39 @@ export function signedNonce(nonce: string, ssecurity: string): string {
 
 /**
  * Plain-channel signature (miIO/*): hmac-sha256 over
- * [pathAfter.com, signedNonce, nonce, k=v, ...] joined with "&", key =
- * base64(signedNonce), result base64.
+ * [url path (leading slash), signedNonce, nonce, sorted k=v, ...] joined
+ * with "&", key = base64(signedNonce) — matches the current micloud
+ * `miutils.gen_signature` (al-one path); the older extractor variant with
+ * the host-less `split('com')[1]` string is no longer accepted.
  */
 export function generateSignature(url: string, signedNonce: string, nonce: string, params: Record<string, string>): string {
-  const parts = [url.split('com')[1] ?? '', signedNonce, nonce]
-  for (const [k, v] of Object.entries(params)) parts.push(`${k}=${v}`)
+  const path = new URL(url).pathname
+  const parts = [path, signedNonce, nonce]
+  for (const [k, v] of Object.entries(params).sort(([a], [b]) => a.localeCompare(b))) parts.push(`${k}=${v}`)
   return createHmac('sha256', Buffer.from(signedNonce, 'base64'))
     .update(parts.join('&'))
     .digest('base64')
 }
 
 /**
- * Encrypted-channel signature: base64(sha1([METHOD, pathWithoutApp, k=v, ...,
- * signedNonce] joined "&")).
+ * Encrypted-channel signature: base64(sha1([METHOD, path (leading slash,
+ * minus the /app prefix), k=v, ..., signedNonce] joined "&")) — matches the
+ * actively maintained al-one/hass-xiaomi-miot `sha1_sign` (the older
+ * extractors' `split('com')[1]` variant is no longer accepted).
  */
 export function generateEncSignature(url: string, method: string, signedNonce: string, params: Record<string, string>): string {
-  const parts = [method.toUpperCase(), (url.split('com')[1] ?? '').replace('/app/', '/'), ...Object.entries(params).map(([k, v]) => `${k}=${v}`), signedNonce]
+  let path = new URL(url).pathname
+  if (path.startsWith('/app/')) path = path.slice(4)
+  const parts = [method.toUpperCase(), path, ...Object.entries(params).map(([k, v]) => `${k}=${v}`), signedNonce]
   return createHash('sha1').update(parts.join('&'), 'utf8').digest('base64')
 }
 
 export function encryptRc4(signedNonce: string, value: string): string {
-  return rc4(Buffer.from(signedNonce, 'base64'), Buffer.from(value, 'utf8')).toString('base64')
+  return rc4Drop1024(Buffer.from(signedNonce, 'base64'), Buffer.from(value, 'utf8')).toString('base64')
 }
 
 export function decryptRc4(signedNonce: string, value: string): string {
-  return rc4(Buffer.from(signedNonce, 'base64'), Buffer.from(value, 'base64')).toString('utf8')
+  return rc4Drop1024(Buffer.from(signedNonce, 'base64'), Buffer.from(value, 'base64')).toString('utf8')
 }
 
 // ---------------------------------------------------------------------------
@@ -351,7 +375,7 @@ export class MiCloudClient implements MiClient {
     return `${this.base}/${method}`
   }
 
-  /** Plain-channel POST (miIO/*): hmac-sha256 signature, plain JSON reply. */
+  /** Plain-channel POST (miIO/*): hmac-sha256 signature, form body, plain JSON reply. */
   private async plain(method: string, payload: Record<string, unknown>, retry = true): Promise<Record<string, unknown>> {
     const session = await this.sessionOrThrow()
     const url = this.apiUrl(method)
@@ -360,14 +384,14 @@ export class MiCloudClient implements MiClient {
     const sNonce = signedNonce(nonce, session.ssecurity)
     const data = JSON.stringify(payload)
     const signature = generateSignature(url, sNonce, nonce, { data })
-    const qs = new URLSearchParams({
+    const form = new URLSearchParams({
       data,
       signature,
       _nonce: nonce,
-      ssecurity: session.ssecurity,
     }).toString()
-    const res = await fetch(`${url}?${qs}`, {
+    const res = await fetch(url, {
       method: 'POST',
+      body: form,
       headers: {
         'User-Agent': this.agent,
         'Content-Type': 'application/x-www-form-urlencoded',
@@ -407,7 +431,6 @@ export class MiCloudClient implements MiClient {
     params.signature = generateEncSignature(url, 'POST', sNonce, params)
     params.ssecurity = session.ssecurity
     params._nonce = nonce
-    params._sessionId = randomUUID()
 
     const qs = new URLSearchParams(params).toString()
     const res = await fetch(`${url}?${qs}`, {
@@ -474,11 +497,12 @@ export class MiCloudClient implements MiClient {
     return list.map(h => {
       const roomsRaw = Array.isArray(h.roomlist) ? h.roomlist : []
       return {
-        home_id: Number(h.home_id ?? 0),
+        // Current API: home id = `id`, owner = `uid`; old shape `home_id`/`owner_id` kept for compatibility.
+        home_id: Number(h.id ?? h.home_id ?? 0),
         name: String(h.name ?? h.label ?? '未命名家庭'),
-        owner_id: Number(h.owner_id ?? h.uid ?? 0),
+        owner_id: Number(h.uid ?? h.owner_id ?? 0),
         rooms: roomsRaw.map(r => ({
-          room_id: Number((r as Record<string, unknown>).room_id ?? 0),
+          room_id: Number((r as Record<string, unknown>).id ?? (r as Record<string, unknown>).room_id ?? 0),
           name: String((r as Record<string, unknown>).name ?? (r as Record<string, unknown>).label ?? ''),
         })),
       }
@@ -494,37 +518,80 @@ export class MiCloudClient implements MiClient {
       support_smart_home: true,
     })
     const result = (json.result ?? {}) as Record<string, unknown>
-    const list = (Array.isArray(result.device_list) ? result.device_list
-      : Array.isArray(result.list) ? result.list
-        : []) as Array<Record<string, unknown>>
+    // Current API: `device_info` with `isOnline`; old shapes kept for compatibility.
+    const list = (Array.isArray(result.device_info) ? result.device_info
+      : Array.isArray(result.device_list) ? result.device_list
+        : Array.isArray(result.list) ? result.list
+          : []) as Array<Record<string, unknown>>
     return list.map(d => ({
       did: String(d.did ?? ''),
       name: String(d.name ?? d.label ?? d.did ?? ''),
       model: String(d.model ?? ''),
-      online: Boolean(d.online ?? d.is_online ?? false),
+      online: Boolean(d.isOnline ?? d.online ?? d.is_online ?? false),
       ...(d.room_id !== undefined && d.room_id !== null ? { room_id: Number(d.room_id) } : {}),
     }))
   }
 
   async rawCommand(did: string, method: string, params: unknown[]): Promise<unknown> {
-    const json = await this.plain('miIO/raw_command', { did, method, params })
-    return json.result
+    // Modern cloud channel for device control: encrypted `miotspec/prop/set`
+    // with known property iids. `set_power` (bool) and `set_bright` (1-100)
+    // are mapped; other methods need per-model MIoT spec knowledge.
+    if (method === 'set_power') {
+      const value = params[0] === 'on' || params[0] === true || params[0] === 1
+      return this.miotSet(did, 2, 1, value)
+    }
+    if (method === 'set_bright') {
+      const value = Number(params[0])
+      if (Number.isNaN(value)) throw new Error(`dsh-mihome: set_bright 需要 1-100 的数值`)
+      return this.miotSet(did, 2, 2, value)
+    }
+    throw new Error(`dsh-mihome: 方法 ${method} 尚未支持云端映射（当前支持 set_power / set_bright）`)
+  }
+
+  private async miotSet(did: string, siid: number, piid: number, value: unknown): Promise<unknown> {
+    const json = await this.encrypted('miotspec/prop/set', {
+      params: [{ did, siid, piid, value }],
+    })
+    return json.result ?? json.code
   }
 
   async getProps(did: string, props: string[]): Promise<Record<string, unknown>> {
+    // Modern channel: encrypted `miotspec/prop/get` with (siid, piid) grid.
+    // Common MIoT identifiers; unsupported entries come back with a negative
+    // `code` and are skipped.
+    const wanted = props.flatMap(name =>
+      (MiCloudClient.PROP_IIDS[name] ?? []).map(i => ({ did, siid: i.siid, piid: i.piid, name })),
+    )
+    if (wanted.length === 0) return {}
     try {
-      const result = await this.rawCommand(did, 'get_prop', props)
+      const json = await this.encrypted('miotspec/prop/get', {
+        params: wanted.map(w => ({ did: w.did, siid: w.siid, piid: w.piid })),
+      })
+      const result = (Array.isArray(json.result) ? json.result : []) as Array<{
+        siid?: number
+        piid?: number
+        value?: unknown
+        code?: number
+      }>
       const out: Record<string, unknown> = {}
-      if (Array.isArray(result)) {
-        props.forEach((p, i) => {
-          const v = result[i]
-          if (v !== '' && v !== undefined && v !== null) out[p] = v
-        })
+      for (const entry of result) {
+        if (entry.code !== undefined && entry.code !== 0) continue
+        const found = wanted.find(w => w.siid === entry.siid && w.piid === entry.piid)
+        if (found && entry.value !== undefined) out[found.name] = entry.value
       }
       return out
     } catch {
       return {}
     }
+  }
+
+  private static readonly PROP_IIDS: Record<string, Array<{ siid: number; piid: number }>> = {
+    power: [{ siid: 2, piid: 1 }],
+    brightness: [{ siid: 2, piid: 2 }],
+    color_temp: [{ siid: 2, piid: 3 }],
+    temperature: [{ siid: 3, piid: 1 }],
+    humidity: [{ siid: 3, piid: 2 }],
+    battery: [{ siid: 4, piid: 1 }, { siid: 3, piid: 3 }],
   }
 }
 
