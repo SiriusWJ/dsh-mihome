@@ -122,6 +122,18 @@ export async function buildDashboardSnapshot(
   }
 }
 
+/** Turn a raw connection error into a friendly, actionable message. */
+function friendlyConnError(err: unknown): string {
+  const raw = err instanceof Error ? err.message.replace(/^dsh-mihome: /, '') : String(err)
+  if (/未配置米家账号/.test(raw) || /MIHOME_USERNAME/.test(raw)) {
+    return '尚未登录米家账号——打开 DSH 设置 → 米家登录，用米家 App 扫码即可；或配置 MIHOME_USERNAME / MIHOME_PASSWORD 环境变量。'
+  }
+  if (/登录失败/.test(raw)) {
+    return `米家登录失败（${raw}）。如账号触发了风控验证，请改用设置页的扫码登录。`
+  }
+  return `无法连接米家云端（${raw}）。请检查网络后重试，或到 设置 → 米家登录 重新登录。`
+}
+
 // ---------------------------------------------------------------------------
 // Tool registration
 // ---------------------------------------------------------------------------
@@ -155,8 +167,8 @@ export function registerTools(
         const v = value as { ok?: boolean; account?: string; region?: string; homes?: number; devices?: number }
         return text(
           v.ok
-            ? `Mi Home reachable: account "${v.account}" (region ${v.region ?? 'unknown'}, ${v.homes ?? 0} 个家庭, ${v.devices ?? 0} 台设备)`
-            : 'Mi Home unreachable: 请确认已扫码登录（设置 → 米家登录）或配置账号（MIHOME_USERNAME / MIHOME_PASSWORD）',
+            ? `🍃 米家已连接：${v.account}（区域 ${v.region ?? 'unknown'} · ${v.homes ?? 0} 个家庭 · ${v.devices ?? 0} 台设备）`
+            : '🍃 米家尚未连接——打开 DSH 设置 → 米家登录，用米家 App 扫码登录（推荐）；或配置 MIHOME_USERNAME / MIHOME_PASSWORD 环境变量后重启。',
         )
       },
     },
@@ -530,9 +542,10 @@ export function registerTools(
       schema: { type: 'json' },
       render: (_args, value) => {
         const s = value as unknown as DashboardSnapshot
+        if (s.error) return text(`🍃 米家未连接：${s.error}`)
         const online = s.devices.filter(d => d.online).length
         return text(
-          `Dashboard snapshot: ${s.devices.length} 台设备 (${online} 在线), ${s.rooms.length} 个房间, ${s.events.length} 条最近变化.`,
+          `🍃 米家仪表盘：${s.devices.length} 台设备（${online} 在线）· ${s.rooms.length} 个房间 · ${s.events.length} 条最近变化`,
         )
       },
       presentationMeta: (_args, value) => value as JsonValue,
@@ -542,11 +555,26 @@ export function registerTools(
         card: 'generic',
         content: result.isError
           ? result.content
-          : [{ type: 'text', text: '🏠 米家仪表盘就绪' }],
+          : [{ type: 'text', text: '🏠 米家仪表盘已就绪' }],
       }
     },
     async execute() {
-      const snapshot = await buildDashboardSnapshot(client, config, changes)
+      let snapshot: DashboardSnapshot
+      try {
+        snapshot = await buildDashboardSnapshot(client, config, changes)
+      } catch (err) {
+        // Not connected: hand the client enough to render a friendly offline
+        // state instead of a raw tool error.
+        snapshot = {
+          kind: DASHBOARD_META_KIND,
+          generatedAt: new Date().toISOString(),
+          homes: [],
+          rooms: [],
+          devices: [],
+          events: [],
+          error: friendlyConnError(err),
+        }
+      }
       return snapshot as unknown as JsonValue
     },
   }))

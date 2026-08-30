@@ -40,4 +40,6 @@ export type DashboardSnapshot = {
   rooms: DashboardRoom[]
   devices: DashboardDevice[]
   events: DashboardEvent[]
+  /** Present when Mi Home is not reachable — the card renders a friendly offline state. */
+  error?: string
 }
