@@ -323,10 +323,24 @@ export class MiCloudClient implements MiClient {
       timeoutMs: number
       resolveUsername: () => Promise<string>
       resolvePassword: () => Promise<string>
+      /** Optional QR-login session persistence (used before password login). */
+      sessionStore?: {
+        load(): Promise<{ userId: string; serviceToken: string; ssecurity: string } | null>
+        clear(): Promise<void>
+      }
     },
   ) {
     const region = opts.region === 'cn' ? '' : `${opts.region}.`
     this.base = `https://${region}api.io.mi.com/app`
+  }
+
+  /** Adopt a freshly obtained session (e.g. right after QR login). */
+  setSession(session: { userId: string; serviceToken: string; ssecurity: string }): void {
+    this.session = { userId: session.userId, serviceToken: session.serviceToken, ssecurity: session.ssecurity }
+  }
+
+  clearSession(): void {
+    this.session = null
   }
 
   /** Full login flow. Records the session used by all API calls. */
@@ -334,7 +348,7 @@ export class MiCloudClient implements MiClient {
     const username = await this.opts.resolveUsername()
     const password = await this.opts.resolvePassword()
     if (!username || !password) {
-      throw new Error('dsh-mihome: 未配置米家账号（MIHOME_USERNAME / MIHOME_PASSWORD，或 config.username/password）')
+      throw new Error('dsh-mihome: 未配置米家账号（MIHOME_USERNAME / MIHOME_PASSWORD，或 config.username/password）—— 也可以在 DSH 设置 → 米家 中扫码登录，会话会自动保存。')
     }
 
     // Step 1: obtain `_sign` for sid=xiaomiio
@@ -404,8 +418,20 @@ export class MiCloudClient implements MiClient {
   }
 
   private async sessionOrThrow(): Promise<Session> {
-    if (!this.session) return this.login()
-    return this.session
+    if (this.session) return this.session
+    // QR-login session persisted by the settings flow, if present.
+    if (this.opts.sessionStore) {
+      const stored = await this.opts.sessionStore.load()
+      if (stored) {
+        this.session = {
+          userId: stored.userId,
+          serviceToken: stored.serviceToken,
+          ssecurity: stored.ssecurity,
+        }
+        return this.session
+      }
+    }
+    return this.login()
   }
 
   private apiUrl(method: string): string {
@@ -438,7 +464,13 @@ export class MiCloudClient implements MiClient {
     })
     if (res.status !== 200) throw new Error(`dsh-mihome: ${method} status ${res.status}`)
     const json = (await res.json()) as Record<string, unknown>
-    if (json.code === -1 && retry) return this.plain(method, payload, false) // session expired
+    if (json.code === -1 && retry) {
+      // Session expired (QR tokens do expire): drop it and let the retry
+      // re-negotiate (stored QR session is cleared; password login follows).
+      this.session = null
+      await this.opts.sessionStore?.clear()
+      return this.plain(method, payload, false)
+    }
     if (json.code !== 0) {
       throw new Error(`dsh-mihome: ${method} failed (code=${json.code} message=${String(json.message ?? json.desc ?? '')})`)
     }
@@ -484,7 +516,12 @@ export class MiCloudClient implements MiClient {
     } catch {
       throw new Error(`dsh-mihome: ${method} 响应无法解密（登录态可能过期，请重试）`)
     }
-    if (json.code === -1 && retry) return this.encrypted(method, payload, false)
+    if (json.code === -1 && retry) {
+      // Session expired: drop it and let the retry re-negotiate.
+      this.session = null
+      await this.opts.sessionStore?.clear()
+      return this.encrypted(method, payload, false)
+    }
     if (json.code !== 0) {
       throw new Error(`dsh-mihome: ${method} failed (code=${json.code} message=${String(json.message ?? json.desc ?? '')})`)
     }

@@ -428,6 +428,153 @@ function DashboardView(props: { node: { data: DashboardChatData } }) {
 }
 
 // ---------------------------------------------------------------------------
+// Settings page: Mi Home QR login (米家 App 扫码登录)
+// ---------------------------------------------------------------------------
+interface AuthStatusBody {
+  ok?: boolean
+  mode?: string
+  stored?: boolean
+  username?: string
+  state?: { phase: string; message: string; expiresAt: number | null }
+}
+
+const PHASE_TEXT: Record<string, string> = {
+  idle: '尚未登录',
+  waiting: '请用米家 App 扫描二维码',
+  scanned: '已提交，请在米家 App 上确认登录',
+  ok: '登录成功，会话已保存',
+  expired: '二维码已过期，请重新生成',
+  failed: '登录失败',
+}
+
+function SettingsMihome(): ReactNode {
+  const [data, setData] = useState<AuthStatusBody | null>(null)
+  const [qr, setQr] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    const load = async () => {
+      try {
+        const res = await fetch('/dsh-mihome/auth/status')
+        const body = (await res.json()) as AuthStatusBody
+        if (!cancelled) setData(body)
+      } catch {
+        if (!cancelled) setError('无法连接插件路由（/dsh-mihome/…）')
+      }
+    }
+    void load()
+    const timer = setInterval(() => { void load() }, 4000)
+    return () => {
+      cancelled = true
+      clearInterval(timer)
+    }
+  }, [])
+
+  const startQr = async () => {
+    setBusy(true)
+    setError(null)
+    try {
+      const res = await fetch('/dsh-mihome/auth/qr', { method: 'POST' })
+      const body = (await res.json()) as AuthStatusBody & { qr?: string; error?: string }
+      if (body.ok && body.qr) {
+        setQr(body.qr)
+        setData(d => ({ ...(d ?? {}), state: body.state }))
+      } else {
+        setError(body.error ?? '生成二维码失败')
+      }
+    } catch {
+      setError('无法请求二维码')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const logout = async () => {
+    setBusy(true)
+    try {
+      await fetch('/dsh-mihome/auth/logout', { method: 'POST' })
+      setQr(null)
+      const res = await fetch('/dsh-mihome/auth/status')
+      setData((await res.json()) as AuthStatusBody)
+    } catch {
+      setError('退出登录失败')
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const phase = data?.state?.phase ?? 'idle'
+  const isDemo = data?.mode === 'demo'
+  const phaseColor = phase === 'ok'
+    ? COLORS.on
+    : phase === 'expired' || phase === 'failed'
+      ? COLORS.danger
+      : phase === 'waiting' || phase === 'scanned'
+        ? COLORS.warn
+        : COLORS.muted
+
+  return createElement('div', { style: { maxWidth: 560, display: 'flex', flexDirection: 'column', gap: 12 } },
+    createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
+      createElement('span', { style: { fontSize: 16 } }, '🐋'),
+      createElement('span', { style: { color: COLORS.text, fontSize: 15, fontWeight: 700 } }, '米家登录'),
+      createElement('span', { style: { marginLeft: 'auto', fontSize: 12, color: phaseColor, fontWeight: 600 } },
+        PHASE_TEXT[phase] ?? phase),
+    ),
+    ...(isDemo ? [
+      createElement('div', {
+        key: 'demo', style: {
+          background: 'rgba(251, 191, 36, 0.08)', border: '1px solid rgba(251, 191, 36, 0.4)',
+          borderRadius: 10, padding: '10px 14px', color: COLORS.warn, fontSize: 13,
+        },
+      }, '当前是演示模式（mode: demo），不需要账号。把配置里的 mode 改为 cloud 后即可扫码登录。'),
+    ] : []),
+    ...(data?.stored ? [
+      createElement('div', {
+        key: 'stored', style: {
+          background: 'rgba(110, 231, 183, 0.08)', border: '1px solid rgba(110, 231, 183, 0.35)',
+          borderRadius: 10, padding: '10px 14px', color: COLORS.on, fontSize: 13,
+        },
+      }, '✅ 已保存米家会话，插件会自动使用它访问云端。'),
+    ] : []),
+    ...(qr ? [
+      createElement('img', { key: 'qr', src: qr, width: 240, height: 240, alt: '米家登录二维码', style: { borderRadius: 10, border: `1px solid ${COLORS.border}`, background: '#fff' } }),
+    ] : []),
+    ...(phase === 'waiting' || phase === 'scanned' ? [
+      createElement('div', { key: 'hint', style: { color: COLORS.muted, fontSize: 12 } },
+        '用米家 App 首页右上角「+」→ 扫一扫，或 App 设置 → 账号安全 内的扫码入口；确认后本页自动变为“登录成功”。'),
+    ] : []),
+    ...(error ? [
+      createElement('div', { key: 'err', style: { color: COLORS.danger, fontSize: 13 } }, error),
+    ] : []),
+    createElement('div', { key: 'btns', style: { display: 'flex', gap: 8, flexWrap: 'wrap' } },
+      createElement('button', {
+        onClick: startQr,
+        disabled: busy || isDemo,
+        style: btnStyle,
+      }, qr ? '↻ 刷新二维码' : '生成登录二维码'),
+      createElement('button', {
+        onClick: logout,
+        disabled: busy || isDemo || !data?.stored,
+        style: { ...btnStyle, color: COLORS.danger },
+      }, '退出登录'),
+    ),
+    createElement('div', {
+      key: 'foot', style: { color: COLORS.muted, fontSize: 12, lineHeight: 1.6 },
+    },
+      '扫码成功后会话保存在 $DSH_HOME/plugin-data/dsh-mihome/session.json，工具自动优先使用；' +
+      '会话失效时会自动清除并回退到 MIHOME_USERNAME / MIHOME_PASSWORD 环境变量登录。'),
+  )
+}
+
+const btnStyle = {
+  height: 32, padding: '0 14px', borderRadius: 8,
+  background: COLORS.card, border: `1px solid ${COLORS.border}`,
+  color: COLORS.text, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit',
+} as const
+
+// ---------------------------------------------------------------------------
 // Client plugin body
 // ---------------------------------------------------------------------------
 export function apply(ctx: ClientContext & Context): void {
@@ -444,6 +591,18 @@ export function apply(ctx: ClientContext & Context): void {
     order: 5,
     label: '🏠 米家',
   }, MihomeView))
+  // Settings page with Mi Home QR login (settings.section may not be part of
+  // the 0.1.1-rc.2 typed SlotMap; the lenient view matches its runtime).
+  const lenient = ctx.slots as unknown as {
+    inject(key: string, cb: () => void): void
+    register(options: { name: string; id?: string; key?: string; order?: number; label?: string }, component: (props?: unknown) => unknown): () => void
+  }
+  lenient.inject('settings.section', () => lenient.register({
+    name: 'settings.section',
+    id: 'mihome',
+    order: 30,
+    label: '米家登录',
+  }, SettingsMihome as (props?: unknown) => unknown))
 }
 
 // Keep the type referenced so the augmentation stays part of the program.

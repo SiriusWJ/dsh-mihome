@@ -1,8 +1,11 @@
 import type { Context } from '@deepseek-ai/cordis'
 import type { PreToolDecision } from '@deepseek-ai/dsh-tools'
 import { credentialRef, type CredentialRef, type ResolvedCredential } from '@deepseek-ai/dsh-credentials'
+import { homedir } from 'node:os'
+import { join } from 'node:path'
 import { Config as ConfigSchema, type Config } from './config'
 import { MiCloudClient, DemoMiClient, categoryOf, type MiClient } from './mi'
+import { QrLoginManager, QrSessionStore } from './qr'
 import { registerTools, cachedDevices, ChangeBuffer, buildDashboardSnapshot } from './tools'
 
 export const name = 'dsh-mihome'
@@ -34,6 +37,18 @@ export function apply(ctx: Context, config: Config) {
   const resolveUsername = resolveCredential(config.usernameEnv)
   const resolvePassword = resolveCredential(config.passwordEnv)
 
+  // QR-login session storage under $DSH_HOME/plugin-data (works alongside
+  // password credentials: the session wins until it expires).
+  const sessionFile = join(
+    process.env.DSH_HOME ?? join(homedir(), '.dsh'),
+    'plugin-data', 'dsh-mihome', 'session.json',
+  )
+  const sessionStore = config.mode === 'cloud'
+    ? new QrSessionStore(sessionFile)
+    : null
+
+  let qrManager: QrLoginManager | null = null
+
   const client: MiClient = config.mode === 'demo'
     ? new DemoMiClient(config.baseUrl, config.timeoutMs)
     : new MiCloudClient({
@@ -41,7 +56,15 @@ export function apply(ctx: Context, config: Config) {
         timeoutMs: config.timeoutMs,
         resolveUsername,
         resolvePassword,
+        sessionStore: sessionStore ?? undefined,
       })
+
+  if (sessionStore && client instanceof MiCloudClient) {
+    qrManager = new QrLoginManager(sessionStore, async (session) => {
+      client.setSession({ userId: session.userId, serviceToken: session.serviceToken, ssecurity: session.ssecurity })
+    })
+    ctx.effect(() => () => qrManager?.dispose(), 'dsh-mihome.qr')
+  }
 
   const changes = new ChangeBuffer(config.recentBufferSize)
 
@@ -61,6 +84,27 @@ export function apply(ctx: Context, config: Config) {
     }): () => void
   } | undefined
   if (webServer) {
+    type JsonRes = {
+      writeHead(status: number, headers?: Record<string, string>): void
+      end(body?: string): void
+    }
+    const sendJson = (res: JsonRes, status: number, body: unknown): void => {
+      res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' })
+      res.end(JSON.stringify(body))
+    }
+    const sameOrigin = (req: unknown): boolean => {
+      const headers = (req as { headers?: Record<string, unknown> })?.headers ?? {}
+      const origin = Array.isArray(headers.origin) ? headers.origin[0] : headers.origin
+      const host = Array.isArray(headers.host) ? headers.host[0] : headers.host
+      if (!origin || origin === 'null') return true
+      if (!host) return false
+      try {
+        return new URL(String(origin)).host === String(host)
+      } catch {
+        return false
+      }
+    }
+
     ctx.effect(() => webServer.register({
       kind: 'exact',
       path: '/dsh-mihome/state',
@@ -70,17 +114,66 @@ export function apply(ctx: Context, config: Config) {
             buildDashboardSnapshot(client, config, changes),
             client.health(),
           ])
-          res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' })
-          res.end(JSON.stringify({ ok: true, snapshot, health }))
+          sendJson(res, 200, { ok: true, snapshot, health })
         } catch (err) {
-          res.writeHead(200, { 'content-type': 'application/json' })
-          res.end(JSON.stringify({
-            ok: false,
-            error: err instanceof Error ? err.message : String(err),
-          }))
+          sendJson(res, 200, { ok: false, error: err instanceof Error ? err.message : String(err) })
         }
       },
     }), 'dsh-mihome.web')
+    // The state route could also feed the QR login status page; register the
+    // auth surface next to it. All auth routes are same-origin guarded.
+
+    if (qrManager) {
+      ctx.effect(() => webServer.register({
+        kind: 'exact',
+        path: '/dsh-mihome/auth/status',
+        handler: async (req, res) => {
+          if (!sameOrigin(req)) {
+            sendJson(res, 403, { ok: false, error: 'cross-origin request rejected' })
+            return
+          }
+          const stored = await sessionStore!.load()
+          sendJson(res, 200, {
+            ok: true,
+            mode: config.mode,
+            stored: stored !== null,
+            username: config.username || '',
+            state: qrManager!.state,
+          })
+        },
+      }), 'dsh-mihome.auth.status')
+
+      ctx.effect(() => webServer.register({
+        kind: 'exact',
+        path: '/dsh-mihome/auth/qr',
+        handler: async (req, res) => {
+          if (!sameOrigin(req)) {
+            sendJson(res, 403, { ok: false, error: 'cross-origin request rejected' })
+            return
+          }
+          const result = await qrManager!.start()
+          if ('error' in result) {
+            sendJson(res, 200, { ok: false, error: result.error, state: qrManager!.state })
+          } else {
+            sendJson(res, 200, { ok: true, qr: result.qr, state: result.state })
+          }
+        },
+      }), 'dsh-mihome.auth.qr')
+
+      ctx.effect(() => webServer.register({
+        kind: 'exact',
+        path: '/dsh-mihome/auth/logout',
+        handler: async (req, res) => {
+          if (!sameOrigin(req)) {
+            sendJson(res, 403, { ok: false, error: 'cross-origin request rejected' })
+            return
+          }
+          await sessionStore!.clear()
+          ;(client as MiCloudClient).clearSession()
+          sendJson(res, 200, { ok: true })
+        },
+      }), 'dsh-mihome.auth.logout')
+    }
   }
 
   // Approval + category-allowlist policy on the tools/pre-execute waterfall.
