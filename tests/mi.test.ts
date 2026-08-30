@@ -66,7 +66,7 @@ describe('generateEncSignature', () => {
     const url = 'https://de.api.io.mi.com/app/v2/home/home_device_list'
     const signedNonce = 'abc'
     const params = { data: '{}' }
-    const parts = ['POST', url.split('com')[1].replace('/app/', '/'), 'data={}', signedNonce]
+    const parts = ['POST', (url.split('com')[1] ?? '').replace('/app/', '/'), 'data={}', signedNonce]
     const expected = createHash('sha1').update(parts.join('&'), 'utf8').digest('base64')
     expect(generateEncSignature(url, 'POST', signedNonce, params)).toBe(expected)
   })

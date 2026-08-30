@@ -1,9 +1,21 @@
 /**
- * Browser half of dsh-mihome: renders a pretty Mi Home dashboard card into
- * the conversation when `mi_dashboard` runs. Loaded by the Web Client's
- * module loader from the package's `dsh.client` manifest.
+ * Browser half of dsh-mihome:
+ *  - renders the Mi Home dashboard card into the conversation when
+ *    `mi_dashboard` runs (keyed chat node from tool/result meta);
+ *  - registers a "🏠 米家" entry in the session header action row (beside the
+ *    agent-preset chip) and a frame-wide full-screen console in shell.overlay
+ *    that replaces the whole UI while open, fed by the same-origin read-only
+ *    endpoint /dsh-mihome/state.
+ * Loaded by the Web Client's module loader from the package's `dsh.client`
+ * manifest.
  */
-import { createElement, type ReactNode } from 'react'
+import {
+  createElement,
+  useEffect,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from 'react'
 import type { Context } from '@deepseek-ai/cordis'
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 import { dashboardDefinition, type DashboardChatData } from './dashboard'
@@ -75,6 +87,17 @@ function fmtValue(value: unknown): string {
   return String(value)
 }
 
+/** Display value with a unit hint for known props. */
+function fmtPropValue(key: string, value: unknown): string {
+  const v = fmtValue(value)
+  if (key === 'brightness') return `${v}%`
+  if (key === 'temperature') return `${v}°C`
+  if (key === 'humidity') return `${v}%`
+  if (key === 'power_consumption') return `${v} W`
+  if (key === 'battery') return `${v}%`
+  return v
+}
+
 /** One highlight prop for the row: brightness → %, temp → °C, else raw. */
 function highlightProp(props: Record<string, unknown>): { key: string; value: string } | null {
   const entries = Object.entries(props)
@@ -82,9 +105,7 @@ function highlightProp(props: Record<string, unknown>): { key: string; value: st
   const preferred = ['brightness', 'temperature', 'humidity', 'power_consumption', 'battery', 'state', 'aqi']
   for (const key of preferred) {
     if (key in props) {
-      const v = fmtValue(props[key])
-      const unit = key === 'brightness' ? '%' : key === 'temperature' ? '°C' : key === 'humidity' ? '%' : ''
-      return { key, value: `${v}${unit}` }
+      return { key, value: fmtPropValue(key, props[key]) }
     }
   }
   const [k, v] = entries[0]!
@@ -121,7 +142,273 @@ function groupDevices(devices: DashboardDevice[]): Array<{ title: string; items:
 }
 
 // ---------------------------------------------------------------------------
-// Dashboard card
+// Open-state store shared by the header entry and the overlay (module-local
+// singleton; both components live in the same client bundle).
+// ---------------------------------------------------------------------------
+const listeners = new Set<() => void>()
+let mihomeOpen = false
+
+function mihomeSubscribe(listener: () => void): () => void {
+  listeners.add(listener)
+  return () => { listeners.delete(listener) }
+}
+
+function getMihomeOpen(): boolean {
+  return mihomeOpen
+}
+
+function setMihomeOpen(open: boolean): void {
+  if (mihomeOpen === open) return
+  mihomeOpen = open
+  for (const listener of listeners) listener()
+}
+
+function useMihomeOpen(): boolean {
+  return useSyncExternalStore(mihomeSubscribe, getMihomeOpen, getMihomeOpen)
+}
+
+// ---------------------------------------------------------------------------
+// Full-screen console data (same-origin read-only route)
+// ---------------------------------------------------------------------------
+interface ConsoleState {
+  ok: boolean
+  snapshot: DashboardSnapshot | null
+  health: { account?: string; region?: string; mode?: string; homes?: number; devices?: number } | null
+  error?: string
+  at: number
+}
+
+interface ConsoleBody {
+  ok?: boolean
+  snapshot?: DashboardSnapshot
+  health?: ConsoleState['health']
+  error?: string
+}
+
+function useConsoleState(open: boolean, tick: number): ConsoleState | null {
+  const [state, setState] = useState<ConsoleState | null>(null)
+  useEffect(() => {
+    if (!open) return
+    let cancelled = false
+    const load = async () => {
+      try {
+        const res = await fetch('/dsh-mihome/state')
+        const body = (await res.json()) as ConsoleBody
+        if (cancelled) return
+        setState({
+          ok: body.ok === true,
+          snapshot: body.snapshot ?? null,
+          health: body.health ?? null,
+          error: body.error,
+          at: Date.now(),
+        })
+      } catch (err) {
+        if (!cancelled) {
+          setState({ ok: false, snapshot: null, health: null, error: String(err), at: Date.now() })
+        }
+      }
+    }
+    void load()
+    const timer = setInterval(() => { void load() }, 3000)
+    return () => {
+      cancelled = true
+      clearInterval(timer)
+    }
+  }, [open, tick])
+  return state
+}
+
+// ---------------------------------------------------------------------------
+// Header entry ("🏠 米家" beside the agent-preset / 创造模式 chip)
+// ---------------------------------------------------------------------------
+function HeaderMihomeButton(): ReactNode {
+  const open = useMihomeOpen()
+  return createElement('button', {
+    onClick: () => setMihomeOpen(true),
+    title: '打开米家控制台（Esc 关闭）',
+    style: {
+      display: 'inline-flex', alignItems: 'center', gap: 4,
+      height: 28, padding: '0 10px', borderRadius: 16,
+      fontSize: 13, fontWeight: 500, whiteSpace: 'nowrap',
+      fontFamily: 'inherit', cursor: 'pointer',
+      color: open ? COLORS.accent : COLORS.text,
+      background: open ? 'rgba(77, 124, 254, 0.12)' : 'transparent',
+      border: '1px solid transparent',
+    },
+  }, '🏠 米家')
+}
+
+// ---------------------------------------------------------------------------
+// Full-screen console (shell.overlay — replaces the whole session UI)
+// ---------------------------------------------------------------------------
+function DeviceCard({ device }: { device: DashboardDevice }): ReactNode {
+  const dot = stateDot(device)
+  const props = Object.entries(device.props ?? {})
+    .filter(([key]) => key !== 'power')
+    .slice(0, 4)
+    .map(([key, value]) => `${key}: ${fmtPropValue(key, value)}`)
+  const power = device.props.power
+  const on = power === 1 || power === '1' || power === 'on' || power === true
+  return createElement('div', {
+    style: {
+      background: COLORS.card,
+      border: `1px solid ${COLORS.border}`,
+      borderRadius: 10,
+      padding: '10px 12px',
+      display: 'flex', flexDirection: 'column', gap: 4,
+    },
+  },
+    createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
+      createElement('span', { style: { fontSize: 16 } }, iconFor(device)),
+      createElement('span', {
+        style: { flex: 1, color: COLORS.text, fontSize: 13, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+      }, device.name || device.did),
+      createElement('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 5 } },
+        createElement('span', {
+          style: { fontSize: 11, color: device.online ? (on ? COLORS.on : COLORS.muted) : COLORS.danger },
+        }, device.online ? (on ? 'on' : 'off') : '离线'),
+        createElement('span', { style: { width: 7, height: 7, borderRadius: '50%', background: dot.color } }),
+      ),
+    ),
+    createElement('div', {
+      style: { color: COLORS.muted, fontSize: 12, lineHeight: 1.5, minHeight: 18 },
+    }, props.length > 0 ? props.join(' · ') : (device.online ? '—' : '设备离线')),
+    createElement('div', { style: { color: COLORS.muted, fontSize: 11, fontFamily: 'ui-monospace, Menlo, monospace' } },
+      device.model),
+  )
+}
+
+function FullMihomeConsole(): ReactNode {
+  const open = useMihomeOpen()
+  const [tick, setTick] = useState(0)
+  const state = useConsoleState(open, tick)
+
+  useEffect(() => {
+    if (!open) return
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setMihomeOpen(false)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [open])
+
+  if (!open) return null
+  const snapshot = state?.snapshot ?? null
+  const groups = snapshot ? groupDevices(snapshot.devices) : []
+  const onlineCount = snapshot ? snapshot.devices.filter(d => d.online).length : 0
+
+  return createElement('div', {
+    style: {
+      position: 'fixed', inset: 0, zIndex: 300,
+      background: '#0e1013', pointerEvents: 'auto',
+      overflowY: 'auto', fontFamily: 'system-ui, -apple-system, "PingFang SC", sans-serif',
+    },
+  },
+    createElement('div', { style: { maxWidth: 1100, margin: '0 auto', padding: '24px 28px 40px' } },
+      // Top bar
+      createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 } },
+        createElement('span', { style: { fontSize: 20 } }, '🏠'),
+        createElement('span', { style: { color: COLORS.text, fontSize: 18, fontWeight: 700 } }, '米家控制台'),
+        createElement('span', { style: { color: COLORS.muted, fontSize: 12, flex: 1 } },
+          state
+            ? (state.health
+                ? `${state.health.account ?? '...'} · 区域 ${state.health.region ?? 'cn'} · ${state.health.homes ?? 0} 家庭 / ${state.health.devices ?? 0} 设备 · 更新于 ${shortTime(new Date(state.at).toISOString())}`
+                : '加载中…')
+            : '加载中…'),
+        createElement('button', {
+          onClick: () => setTick(t => t + 1),
+          style: {
+            height: 30, padding: '0 12px', borderRadius: 8,
+            background: 'transparent', border: `1px solid ${COLORS.border}`,
+            color: COLORS.text, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit',
+          },
+        }, '↻ 刷新'),
+        createElement('button', {
+          onClick: () => setMihomeOpen(false),
+          style: {
+            height: 30, padding: '0 12px', borderRadius: 8,
+            background: COLORS.card, border: `1px solid ${COLORS.border}`,
+            color: COLORS.text, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit',
+          },
+        }, '✕ 关闭 (Esc)'),
+      ),
+      // Connection problem
+      ...(state && !state.ok ? [
+        createElement('div', {
+          key: 'err',
+          style: {
+            background: 'rgba(248, 113, 113, 0.08)', border: '1px solid rgba(248, 113, 113, 0.4)',
+            borderRadius: 10, padding: '10px 14px', color: COLORS.danger, fontSize: 13, marginBottom: 12,
+          },
+        }, `连接米家失败：${state.error ?? '未知错误'}`),
+      ] : []),
+      // Rooms
+      ...(snapshot && snapshot.rooms.length > 0 ? [
+        createElement('div', {
+          key: 'rooms', style: { display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 16 },
+        },
+          ...snapshot.rooms.map(room =>
+            createElement('span', {
+              key: room.room_id,
+              style: {
+                fontSize: 12, color: COLORS.text, background: COLORS.card,
+                border: `1px solid ${COLORS.border}`, borderRadius: 99, padding: '4px 12px',
+              },
+            }, `🏠 ${room.name}`)),
+        ),
+      ] : []),
+      // Summary line
+      ...(snapshot ? [
+        createElement('div', {
+          key: 'summary',
+          style: { color: COLORS.muted, fontSize: 12, marginBottom: 14 },
+        }, `${snapshot.devices.length} 台设备（${onlineCount} 在线）· 每 3 秒自动刷新 · 控制请回到会话用 mi_turn / mi_control（需人工审批）`),
+      ] : []),
+      // Device groups
+      ...groups.map(group =>
+        createElement('div', { key: group.title, style: { marginBottom: 18 } },
+          createElement('div', { style: { color: COLORS.muted, fontSize: 12, marginBottom: 8, fontWeight: 600 } }, group.title),
+          createElement('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))', gap: 8 } },
+            ...group.items.map(device => createElement(DeviceCard, { key: device.did, device })),
+          ),
+        ),
+      ),
+      // Empty / waiting
+      ...(!snapshot && !state ? [
+        createElement('div', {
+          key: 'loading', style: { color: COLORS.muted, fontSize: 13, padding: '40px 0', textAlign: 'center' },
+        }, '正在连接米家…'),
+      ] : []),
+     ...(!snapshot && state ? [
+        createElement('div', {
+          key: 'empty',
+          style: { color: COLORS.muted, fontSize: 13, padding: '40px 0', textAlign: 'center' },
+        }, '暂无设备数据'),
+      ] : []),
+      // Recent events
+      ...(snapshot && snapshot.events.length > 0 ? [
+        createElement('div', {
+          key: 'events', style: { marginTop: 8, paddingTop: 14, borderTop: `1px solid ${COLORS.border}` },
+        },
+          createElement('div', { style: { color: COLORS.muted, fontSize: 12, marginBottom: 6, fontWeight: 600 } }, '🕐 最近变化'),
+          ...snapshot.events.slice(0, 8).map((event, i) =>
+            createElement('div', {
+              key: i, style: { color: COLORS.muted, fontSize: 13, display: 'flex', gap: 8, padding: '2px 0' },
+            },
+              createElement('span', {}, '📌'),
+              createElement('span', { style: { flex: 1 } },
+                `${event.name}: ${event.changes.map(c => `${c[0]} ${c[1] ?? '—'} → ${c[2] ?? ''}`).join('，')}`),
+              createElement('span', {}, shortTime(event.time)),
+            ),
+          ),
+        ),
+      ] : []),
+    ),
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Conversation dashboard card (mi_dashboard)
 // ---------------------------------------------------------------------------
 function DeviceRow({ device }: { device: DashboardDevice }) {
   const dot = stateDot(device)
@@ -219,6 +506,26 @@ export function apply(ctx: ClientContext & Context): void {
     name: 'conversation.chat.node',
     key: 'mihome-dashboard',
   }, DashboardView))
+  // Fixed header entry beside the agent-preset chip ("创造模式").
+  ctx.slots.inject('conversation.session.header.actions', () => ctx.slots.register({
+    name: 'conversation.session.header.actions',
+    id: 'mihome',
+    order: -5,
+    label: '米家',
+  }, HeaderMihomeButton))
+  // Frame-wide console replacing the whole session UI while open.
+  // `shell.overlay` exists at runtime (the root seat declares it and
+  // dsh-market already occupies it) but is not part of the 0.1.1-rc.2 typed
+  // SlotMap, so the registration goes through a lenient view of `slots`.
+  const lenient = ctx.slots as unknown as {
+    inject(key: string, cb: () => void): void
+    register(options: { name: string; id?: string; key?: string; order?: number }, component: (props?: unknown) => unknown): () => void
+  }
+  lenient.inject('shell.overlay', () => lenient.register({
+    name: 'shell.overlay',
+    id: 'mihome',
+    order: 100,
+  }, FullMihomeConsole as (props?: unknown) => unknown))
 }
 
 // Keep the type referenced so the augmentation stays part of the program.

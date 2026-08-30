@@ -3,7 +3,7 @@ import type { PreToolDecision } from '@deepseek-ai/dsh-tools'
 import { credentialRef, type CredentialRef, type ResolvedCredential } from '@deepseek-ai/dsh-credentials'
 import { Config as ConfigSchema, type Config } from './config'
 import { MiCloudClient, DemoMiClient, categoryOf, type MiClient } from './mi'
-import { registerTools, cachedDevices, ChangeBuffer } from './tools'
+import { registerTools, cachedDevices, ChangeBuffer, buildDashboardSnapshot } from './tools'
 
 export const name = 'dsh-mihome'
 export const inject = ['tools']
@@ -46,6 +46,42 @@ export function apply(ctx: Context, config: Config) {
   const changes = new ChangeBuffer(config.recentBufferSize)
 
   registerTools(ctx, client, config, changes)
+
+  // Read-only state endpoint powering the full-screen Mi Home console in the
+  // Web UI (header entry + shell.overlay). GET only — control stays on the
+  // approval-gated tools, so this route cannot change anything.
+  const webServer = ctx.get('webServer') as {
+    register(route: {
+      kind: string
+      path: string
+      handler: (req: unknown, res: {
+        writeHead(status: number, headers?: Record<string, string>): void
+        end(body?: string): void
+      }) => void | Promise<void>
+    }): () => void
+  } | undefined
+  if (webServer) {
+    ctx.effect(() => webServer.register({
+      kind: 'exact',
+      path: '/dsh-mihome/state',
+      handler: async (_req, res) => {
+        try {
+          const [snapshot, health] = await Promise.all([
+            buildDashboardSnapshot(client, config, changes),
+            client.health(),
+          ])
+          res.writeHead(200, { 'content-type': 'application/json', 'cache-control': 'no-store' })
+          res.end(JSON.stringify({ ok: true, snapshot, health }))
+        } catch (err) {
+          res.writeHead(200, { 'content-type': 'application/json' })
+          res.end(JSON.stringify({
+            ok: false,
+            error: err instanceof Error ? err.message : String(err),
+          }))
+        }
+      },
+    }), 'dsh-mihome.web')
+  }
 
   // Approval + category-allowlist policy on the tools/pre-execute waterfall.
   // `ask` pauses the call until a human approves through the approval seam.

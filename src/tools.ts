@@ -83,6 +83,46 @@ export class ChangeBuffer {
 }
 
 // ---------------------------------------------------------------------------
+// Dashboard snapshot builder (shared by the mi_dashboard tool and the
+// /dsh-mihome/state web route feeding the full-screen console)
+// ---------------------------------------------------------------------------
+
+export async function buildDashboardSnapshot(
+  client: MiClient,
+  config: Config,
+  changes: ChangeBuffer,
+): Promise<DashboardSnapshot> {
+  const { homes, devices } = await cachedDevices(client)
+  const home = homes[0]
+  const rooms: DashboardRoom[] = home?.rooms ?? []
+
+  // Fetch props for up to `dashboardPropsLimit` devices, individually;
+  // failures degrade to an empty props map (device offline, wrong model…).
+  const limit = Math.min(Math.max(config.dashboardPropsLimit, 1), 100)
+  const targets = devices.slice(0, limit)
+  const propsList = await Promise.allSettled(targets.map(d =>
+    client.getProps(d.did, propsForCategory(categoryOf(d.model))),
+  ))
+  const snapshotDevices: DashboardDevice[] = targets.map((d, i) => ({
+    did: d.did,
+    name: d.name,
+    model: d.model,
+    online: d.online,
+    category: categoryOf(d.model),
+    props: (propsList[i]?.status === 'fulfilled' ? propsList[i].value : {}) as Record<string, unknown>,
+  }))
+
+  return {
+    kind: DASHBOARD_META_KIND,
+    generatedAt: new Date().toISOString(),
+    homes: homes.map(h => ({ home_id: h.home_id, name: h.name })),
+    rooms,
+    devices: snapshotDevices,
+    events: changes.latest(8),
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Tool registration
 // ---------------------------------------------------------------------------
 
@@ -508,34 +548,7 @@ export function registerTools(
       }
     },
     async execute() {
-      const { homes, devices } = await cachedDevices(client)
-      const home = homes[0]
-      const rooms: DashboardRoom[] = home?.rooms ?? []
-
-      // Fetch props for up to `dashboardPropsLimit` devices, individually;
-      // failures degrade to an empty props map (device offline, wrong model…).
-      const limit = Math.min(Math.max(config.dashboardPropsLimit, 1), 100)
-      const targets = devices.slice(0, limit)
-      const propsList = await Promise.allSettled(targets.map(d =>
-        client.getProps(d.did, propsForCategory(categoryOf(d.model))),
-      ))
-      const snapshotDevices: DashboardDevice[] = targets.map((d, i) => ({
-        did: d.did,
-        name: d.name,
-        model: d.model,
-        online: d.online,
-        category: categoryOf(d.model),
-        props: (propsList[i]?.status === 'fulfilled' ? propsList[i].value : {}) as Record<string, unknown>,
-      }))
-
-      const snapshot: DashboardSnapshot = {
-        kind: DASHBOARD_META_KIND,
-        generatedAt: new Date().toISOString(),
-        homes: homes.map(h => ({ home_id: h.home_id, name: h.name })),
-        rooms,
-        devices: snapshotDevices,
-        events: changes.latest(8),
-      }
+      const snapshot = await buildDashboardSnapshot(client, config, changes)
       return snapshot as unknown as JsonValue
     },
   }))
