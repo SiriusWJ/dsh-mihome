@@ -38,7 +38,7 @@ Restart `dsh --profile web` afterwards. Manage it in **Settings → Plugins**.
 ## No Xiaomi account? Demo mode
 
 ```sh
-git clone https://github.com/<owner>/dsh-mihome
+git clone https://github.com/SiriusWJ/dsh-mihome
 cd dsh-mihome && pnpm install && pnpm demo:mi    # fake Mi Home Cloud on http://127.0.0.1:8125
 ```
 

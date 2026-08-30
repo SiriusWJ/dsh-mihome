@@ -75,7 +75,7 @@ dsh plugin --profile web add dsh-mihome
 ## 🧪 没有米家账号？先玩演示模式
 
 ```sh
-git clone https://github.com/<owner>/dsh-mihome
+git clone https://github.com/SiriusWJ/dsh-mihome
 cd dsh-mihome
 pnpm install
 pnpm demo:mi          # 在 http://127.0.0.1:8125 起一个假的米家云
