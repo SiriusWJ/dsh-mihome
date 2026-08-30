@@ -43,9 +43,7 @@ export function apply(ctx: Context, config: Config) {
     process.env.DSH_HOME ?? join(homedir(), '.dsh'),
     'plugin-data', 'dsh-mihome', 'session.json',
   )
-  const sessionStore = config.mode === 'cloud'
-    ? new QrSessionStore(sessionFile)
-    : null
+  const sessionStore = new QrSessionStore(sessionFile)
 
   let qrManager: QrLoginManager | null = null
 
@@ -56,10 +54,10 @@ export function apply(ctx: Context, config: Config) {
         timeoutMs: config.timeoutMs,
         resolveUsername,
         resolvePassword,
-        sessionStore: sessionStore ?? undefined,
+        sessionStore,
       })
 
-  if (sessionStore && client instanceof MiCloudClient) {
+  if (client instanceof MiCloudClient) {
     qrManager = new QrLoginManager(sessionStore, async (session) => {
       client.setSession({ userId: session.userId, serviceToken: session.serviceToken, ssecurity: session.ssecurity })
     })
@@ -123,57 +121,66 @@ export function apply(ctx: Context, config: Config) {
     // The state route could also feed the QR login status page; register the
     // auth surface next to it. All auth routes are same-origin guarded.
 
-    if (qrManager) {
-      ctx.effect(() => webServer.register({
-        kind: 'exact',
-        path: '/dsh-mihome/auth/status',
-        handler: async (req, res) => {
-          if (!sameOrigin(req)) {
-            sendJson(res, 403, { ok: false, error: 'cross-origin request rejected' })
-            return
-          }
-          const stored = await sessionStore!.load()
+    // Auth routes are registered in BOTH modes so the settings page always
+    // finds them; demo mode answers with a friendly hint instead of starting
+    // QR against the cloud.
+    ctx.effect(() => webServer.register({
+      kind: 'exact',
+      path: '/dsh-mihome/auth/status',
+      handler: async (req, res) => {
+        if (!sameOrigin(req)) {
+          sendJson(res, 403, { ok: false, error: 'cross-origin request rejected' })
+          return
+        }
+        const stored = await sessionStore.load()
+        sendJson(res, 200, {
+          ok: true,
+          mode: config.mode,
+          stored: stored !== null,
+          username: config.username || '',
+          state: qrManager?.state ?? { phase: 'idle', message: '演示模式', expiresAt: null },
+        })
+      },
+    }), 'dsh-mihome.auth.status')
+
+    ctx.effect(() => webServer.register({
+      kind: 'exact',
+      path: '/dsh-mihome/auth/qr',
+      handler: async (req, res) => {
+        if (!sameOrigin(req)) {
+          sendJson(res, 403, { ok: false, error: 'cross-origin request rejected' })
+          return
+        }
+        if (!qrManager || config.mode !== 'cloud') {
           sendJson(res, 200, {
-            ok: true,
-            mode: config.mode,
-            stored: stored !== null,
-            username: config.username || '',
-            state: qrManager!.state,
+            ok: false,
+            error: '演示模式无需登录：把配置里的 mode 改为 cloud 后再扫码。',
+            state: { phase: 'idle', message: '演示模式', expiresAt: null },
           })
-        },
-      }), 'dsh-mihome.auth.status')
+          return
+        }
+        const result = await qrManager.start()
+        if ('error' in result) {
+          sendJson(res, 200, { ok: false, error: result.error, state: qrManager.state })
+        } else {
+          sendJson(res, 200, { ok: true, qr: result.qr, state: result.state })
+        }
+      },
+    }), 'dsh-mihome.auth.qr')
 
-      ctx.effect(() => webServer.register({
-        kind: 'exact',
-        path: '/dsh-mihome/auth/qr',
-        handler: async (req, res) => {
-          if (!sameOrigin(req)) {
-            sendJson(res, 403, { ok: false, error: 'cross-origin request rejected' })
-            return
-          }
-          const result = await qrManager!.start()
-          if ('error' in result) {
-            sendJson(res, 200, { ok: false, error: result.error, state: qrManager!.state })
-          } else {
-            sendJson(res, 200, { ok: true, qr: result.qr, state: result.state })
-          }
-        },
-      }), 'dsh-mihome.auth.qr')
-
-      ctx.effect(() => webServer.register({
-        kind: 'exact',
-        path: '/dsh-mihome/auth/logout',
-        handler: async (req, res) => {
-          if (!sameOrigin(req)) {
-            sendJson(res, 403, { ok: false, error: 'cross-origin request rejected' })
-            return
-          }
-          await sessionStore!.clear()
-          ;(client as MiCloudClient).clearSession()
-          sendJson(res, 200, { ok: true })
-        },
-      }), 'dsh-mihome.auth.logout')
-    }
+    ctx.effect(() => webServer.register({
+      kind: 'exact',
+      path: '/dsh-mihome/auth/logout',
+      handler: async (req, res) => {
+        if (!sameOrigin(req)) {
+          sendJson(res, 403, { ok: false, error: 'cross-origin request rejected' })
+          return
+        }
+        await sessionStore.clear()
+        if (client instanceof MiCloudClient) client.clearSession()
+        sendJson(res, 200, { ok: true })
+      },
+    }), 'dsh-mihome.auth.logout')
   }
 
   // Approval + category-allowlist policy on the tools/pre-execute waterfall.

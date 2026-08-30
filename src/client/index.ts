@@ -458,10 +458,16 @@ function SettingsMihome(): ReactNode {
     const load = async () => {
       try {
         const res = await fetch('/dsh-mihome/auth/status')
-        const body = (await res.json()) as AuthStatusBody
-        if (!cancelled) setData(body)
+        const body = (await res.json().catch(() => null)) as AuthStatusBody | null
+        if (cancelled) return
+        if (!body) {
+          setError(`无法连接插件路由（HTTP ${res.status}）—— 请确认 Settings → 插件 中 dsh-mihome 已启用，且重启过 dsh`)
+        } else {
+          setError(null)
+          setData(body)
+        }
       } catch {
-        if (!cancelled) setError('无法连接插件路由（/dsh-mihome/…）')
+        if (!cancelled) setError('无法连接插件路由（/dsh-mihome/…）—— 请确认 dsh-mihome 已加载并重启过 dsh')
       }
     }
     void load()
@@ -585,10 +591,11 @@ export function apply(ctx: ClientContext & Context): void {
   }, DashboardView))
   // Fixed top entry in the session view ring: one click replaces the chat
   // area with the Mi Home console (sidebar + header stay; chat tab returns).
+  // Last position in the tab ring.
   ctx.slots.inject('conversation.view', () => ctx.slots.register({
     name: 'conversation.view',
     id: 'mihome',
-    order: 5,
+    order: 100,
     label: '🏠 米家',
   }, MihomeView))
   // Settings page with Mi Home QR login (settings.section may not be part of
