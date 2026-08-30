@@ -2,20 +2,14 @@
  * Browser half of dsh-mihome:
  *  - renders the Mi Home dashboard card into the conversation when
  *    `mi_dashboard` runs (keyed chat node from tool/result meta);
- *  - registers a "🏠 米家" entry in the session header action row (beside the
- *    agent-preset chip) and a frame-wide full-screen console in shell.overlay
- *    that replaces the whole UI while open, fed by the same-origin read-only
- *    endpoint /dsh-mihome/state.
+ *  - registers a "🏠 米家" conversation view (id `mihome`) in the session's
+ *    top view ring: one click replaces the chat area with the full-screen
+ *    Mi Home console — sidebar, header and title stay in place. Data comes
+ *    from the same-origin read-only endpoint /dsh-mihome/state.
  * Loaded by the Web Client's module loader from the package's `dsh.client`
  * manifest.
  */
-import {
-  createElement,
-  useEffect,
-  useState,
-  useSyncExternalStore,
-  type ReactNode,
-} from 'react'
+import { createElement, useEffect, useState, type ReactNode } from 'react'
 import type { Context } from '@deepseek-ai/cordis'
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
 import { dashboardDefinition, type DashboardChatData } from './dashboard'
@@ -142,33 +136,7 @@ function groupDevices(devices: DashboardDevice[]): Array<{ title: string; items:
 }
 
 // ---------------------------------------------------------------------------
-// Open-state store shared by the header entry and the overlay (module-local
-// singleton; both components live in the same client bundle).
-// ---------------------------------------------------------------------------
-const listeners = new Set<() => void>()
-let mihomeOpen = false
-
-function mihomeSubscribe(listener: () => void): () => void {
-  listeners.add(listener)
-  return () => { listeners.delete(listener) }
-}
-
-function getMihomeOpen(): boolean {
-  return mihomeOpen
-}
-
-function setMihomeOpen(open: boolean): void {
-  if (mihomeOpen === open) return
-  mihomeOpen = open
-  for (const listener of listeners) listener()
-}
-
-function useMihomeOpen(): boolean {
-  return useSyncExternalStore(mihomeSubscribe, getMihomeOpen, getMihomeOpen)
-}
-
-// ---------------------------------------------------------------------------
-// Full-screen console data (same-origin read-only route)
+// Console data (same-origin read-only route)
 // ---------------------------------------------------------------------------
 interface ConsoleState {
   ok: boolean
@@ -185,10 +153,9 @@ interface ConsoleBody {
   error?: string
 }
 
-function useConsoleState(open: boolean, tick: number): ConsoleState | null {
+function useConsoleState(tick: number): ConsoleState | null {
   const [state, setState] = useState<ConsoleState | null>(null)
   useEffect(() => {
-    if (!open) return
     let cancelled = false
     const load = async () => {
       try {
@@ -214,32 +181,12 @@ function useConsoleState(open: boolean, tick: number): ConsoleState | null {
       cancelled = true
       clearInterval(timer)
     }
-  }, [open, tick])
+  }, [tick])
   return state
 }
 
 // ---------------------------------------------------------------------------
-// Header entry ("🏠 米家" beside the agent-preset / 创造模式 chip)
-// ---------------------------------------------------------------------------
-function HeaderMihomeButton(): ReactNode {
-  const open = useMihomeOpen()
-  return createElement('button', {
-    onClick: () => setMihomeOpen(true),
-    title: '打开米家控制台（Esc 关闭）',
-    style: {
-      display: 'inline-flex', alignItems: 'center', gap: 4,
-      height: 28, padding: '0 10px', borderRadius: 16,
-      fontSize: 13, fontWeight: 500, whiteSpace: 'nowrap',
-      fontFamily: 'inherit', cursor: 'pointer',
-      color: open ? COLORS.accent : COLORS.text,
-      background: open ? 'rgba(77, 124, 254, 0.12)' : 'transparent',
-      border: '1px solid transparent',
-    },
-  }, '🏠 米家')
-}
-
-// ---------------------------------------------------------------------------
-// Full-screen console (shell.overlay — replaces the whole session UI)
+// Device cards
 // ---------------------------------------------------------------------------
 function DeviceCard({ device }: { device: DashboardDevice }): ReactNode {
   const dot = stateDot(device)
@@ -278,33 +225,24 @@ function DeviceCard({ device }: { device: DashboardDevice }): ReactNode {
   )
 }
 
-function FullMihomeConsole(): ReactNode {
-  const open = useMihomeOpen()
+// ---------------------------------------------------------------------------
+// Mi Home view (replaces the chat area while active; lives in the top view
+// ring as a "🏠 米家" tab, so sidebar and header stay untouched)
+// ---------------------------------------------------------------------------
+function MihomeView(): ReactNode {
   const [tick, setTick] = useState(0)
-  const state = useConsoleState(open, tick)
-
-  useEffect(() => {
-    if (!open) return
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setMihomeOpen(false)
-    }
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [open])
-
-  if (!open) return null
+  const state = useConsoleState(tick)
   const snapshot = state?.snapshot ?? null
   const groups = snapshot ? groupDevices(snapshot.devices) : []
   const onlineCount = snapshot ? snapshot.devices.filter(d => d.online).length : 0
 
   return createElement('div', {
     style: {
-      position: 'fixed', inset: 0, zIndex: 300,
-      background: '#0e1013', pointerEvents: 'auto',
-      overflowY: 'auto', fontFamily: 'system-ui, -apple-system, "PingFang SC", sans-serif',
+      height: '100%', overflowY: 'auto', background: '#0e1013',
+      fontFamily: 'system-ui, -apple-system, "PingFang SC", sans-serif',
     },
   },
-    createElement('div', { style: { maxWidth: 1100, margin: '0 auto', padding: '24px 28px 40px' } },
+    createElement('div', { style: { maxWidth: 1100, margin: '0 auto', padding: '20px 24px 40px' } },
       // Top bar
       createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 10, marginBottom: 16 } },
         createElement('span', { style: { fontSize: 20 } }, '🏠'),
@@ -323,14 +261,6 @@ function FullMihomeConsole(): ReactNode {
             color: COLORS.text, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit',
           },
         }, '↻ 刷新'),
-        createElement('button', {
-          onClick: () => setMihomeOpen(false),
-          style: {
-            height: 30, padding: '0 12px', borderRadius: 8,
-            background: COLORS.card, border: `1px solid ${COLORS.border}`,
-            color: COLORS.text, fontSize: 13, cursor: 'pointer', fontFamily: 'inherit',
-          },
-        }, '✕ 关闭 (Esc)'),
       ),
       // Connection problem
       ...(state && !state.ok ? [
@@ -362,7 +292,7 @@ function FullMihomeConsole(): ReactNode {
         createElement('div', {
           key: 'summary',
           style: { color: COLORS.muted, fontSize: 12, marginBottom: 14 },
-        }, `${snapshot.devices.length} 台设备（${onlineCount} 在线）· 每 3 秒自动刷新 · 控制请回到会话用 mi_turn / mi_control（需人工审批）`),
+        }, `${snapshot.devices.length} 台设备（${onlineCount} 在线）· 每 3 秒自动刷新 · 控制请回聊天用 mi_turn / mi_control（需人工审批）`),
       ] : []),
       // Device groups
       ...groups.map(group =>
@@ -379,7 +309,7 @@ function FullMihomeConsole(): ReactNode {
           key: 'loading', style: { color: COLORS.muted, fontSize: 13, padding: '40px 0', textAlign: 'center' },
         }, '正在连接米家…'),
       ] : []),
-     ...(!snapshot && state ? [
+      ...(!snapshot && state ? [
         createElement('div', {
           key: 'empty',
           style: { color: COLORS.muted, fontSize: 13, padding: '40px 0', textAlign: 'center' },
@@ -506,26 +436,14 @@ export function apply(ctx: ClientContext & Context): void {
     name: 'conversation.chat.node',
     key: 'mihome-dashboard',
   }, DashboardView))
-  // Fixed header entry beside the agent-preset chip ("创造模式").
-  ctx.slots.inject('conversation.session.header.actions', () => ctx.slots.register({
-    name: 'conversation.session.header.actions',
+  // Fixed top entry in the session view ring: one click replaces the chat
+  // area with the Mi Home console (sidebar + header stay; chat tab returns).
+  ctx.slots.inject('conversation.view', () => ctx.slots.register({
+    name: 'conversation.view',
     id: 'mihome',
-    order: -5,
-    label: '米家',
-  }, HeaderMihomeButton))
-  // Frame-wide console replacing the whole session UI while open.
-  // `shell.overlay` exists at runtime (the root seat declares it and
-  // dsh-market already occupies it) but is not part of the 0.1.1-rc.2 typed
-  // SlotMap, so the registration goes through a lenient view of `slots`.
-  const lenient = ctx.slots as unknown as {
-    inject(key: string, cb: () => void): void
-    register(options: { name: string; id?: string; key?: string; order?: number }, component: (props?: unknown) => unknown): () => void
-  }
-  lenient.inject('shell.overlay', () => lenient.register({
-    name: 'shell.overlay',
-    id: 'mihome',
-    order: 100,
-  }, FullMihomeConsole as (props?: unknown) => unknown))
+    order: 5,
+    label: '🏠 米家',
+  }, MihomeView))
 }
 
 // Keep the type referenced so the augmentation stays part of the program.
