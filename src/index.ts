@@ -62,24 +62,21 @@ export function apply(ctx: Context, config: Config) {
 
   registerTools(ctx, client, config, changes)
 
-  // Read-only state endpoint powering the full-screen Mi Home console in the
-  // Web UI (header entry + shell.overlay). GET only — control stays on the
-  // approval-gated tools, so this route cannot change anything.
-  const webServer = ctx.get('webServer') as {
-    register(route: {
-      kind: string
-      path: string
-      handler: (req: unknown, res: {
-        writeHead(status: number, headers?: Record<string, string>): void
-        end(body?: string): void
-      }) => void | Promise<void>
-    }): () => void
-  } | undefined
-  if (webServer) {
-    type JsonRes = {
-      writeHead(status: number, headers?: Record<string, string>): void
-      end(body?: string): void
-    }
+  // Read-only state + auth routes. This runtime exposes the browser server
+  // to bundle plugins through hard injection — `ctx.get('webServer')` returns
+  // undefined in a bundle plugin's scope (verified against dsh-restart-btn,
+  // the proven in-deployment pattern).
+  type JsonRes = {
+    writeHead(status: number, headers?: Record<string, string>): void
+    end(body?: string): void
+  }
+  type WebServerFace = {
+    register(route: { kind: string; path: string; handler: (req: unknown, res: JsonRes) => void | Promise<void> }): () => void
+  }
+  const sysCtx = ctx as unknown as {
+    inject(keys: string[], cb: (host: { effect(fn: () => void | (() => void), label?: string): void; webServer: WebServerFace }) => void): void
+  }
+  sysCtx.inject(['webServer'], (host) => {
     const sendJson = (res: JsonRes, status: number, body: unknown): void => {
       res.writeHead(status, { 'content-type': 'application/json', 'cache-control': 'no-store' })
       res.end(JSON.stringify(body))
@@ -97,7 +94,7 @@ export function apply(ctx: Context, config: Config) {
       }
     }
 
-    ctx.effect(() => webServer.register({
+    host.effect(() => host.webServer.register({
       kind: 'exact',
       path: '/dsh-mihome/state',
       handler: async (_req, res) => {
@@ -114,7 +111,7 @@ export function apply(ctx: Context, config: Config) {
     }), 'dsh-mihome.web')
     // Auth routes (settings page QR login). All auth routes are same-origin
     // guarded.
-    ctx.effect(() => webServer.register({
+    host.effect(() => host.webServer.register({
       kind: 'exact',
       path: '/dsh-mihome/auth/status',
       handler: async (req, res) => {
@@ -132,7 +129,7 @@ export function apply(ctx: Context, config: Config) {
       },
     }), 'dsh-mihome.auth.status')
 
-    ctx.effect(() => webServer.register({
+    host.effect(() => host.webServer.register({
       kind: 'exact',
       path: '/dsh-mihome/auth/qr',
       handler: async (req, res) => {
@@ -149,7 +146,7 @@ export function apply(ctx: Context, config: Config) {
       },
     }), 'dsh-mihome.auth.qr')
 
-    ctx.effect(() => webServer.register({
+    host.effect(() => host.webServer.register({
       kind: 'exact',
       path: '/dsh-mihome/auth/logout',
       handler: async (req, res) => {
@@ -162,7 +159,7 @@ export function apply(ctx: Context, config: Config) {
         sendJson(res, 200, { ok: true })
       },
     }), 'dsh-mihome.auth.logout')
-  }
+  })
 
   // Approval + category-allowlist policy on the tools/pre-execute waterfall.
   // `ask` pauses the call until a human approves through the approval seam.
