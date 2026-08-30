@@ -1,7 +1,7 @@
 import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto'
 
 /**
- * Mi Home (米家) cloud and demo clients.
+ * Mi Home (米家) cloud client.
  *
  * Cloud path implements the community-documented Xiaomi Mi Home app API:
  *
@@ -19,9 +19,6 @@ import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto'
  * This mirrors the flow proven by Xiaomi-cloud-tokens-extractor and
  * python-miio's cloud extractor. The API is not officially documented and
  * may change without notice; errors are surfaced as clear messages.
- *
- * Demo path talks to scripts/demo-mi.mjs over the same HTTP surface with
- * plain JSON (no login/signing) so the whole UI can be exercised offline.
  */
 
 // ---------------------------------------------------------------------------
@@ -187,7 +184,6 @@ export interface ChangeEvent {
 }
 
 export interface MiClient {
-  readonly mode: 'cloud' | 'demo'
   health(): Promise<{ ok: boolean; account: string; region: string; homes: number; devices: number }>
   getHomes(): Promise<HomeInfo[]>
   getDevices(homeId: number, ownerId: number): Promise<DeviceInfo[]>
@@ -195,88 +191,6 @@ export interface MiClient {
   rawCommand(did: string, method: string, params: unknown[]): Promise<unknown>
   /** Convenience: read props of one device (miIO get_prop). */
   getProps(did: string, props: string[]): Promise<Record<string, unknown>>
-}
-
-// ---------------------------------------------------------------------------
-// Demo client (plain JSON against scripts/demo-mi.mjs)
-// ---------------------------------------------------------------------------
-
-export class DemoMiClient implements MiClient {
-  readonly mode = 'demo' as const
-
-  constructor(
-    private readonly baseUrl: string,
-    private readonly timeoutMs: number,
-  ) {}
-
-  private async post(path: string, data: unknown): Promise<Record<string, unknown>> {
-    const url = new URL(`${this.baseUrl.replace(/\/$/, '')}${path}`)
-    url.searchParams.set('data', JSON.stringify(data ?? {}))
-    url.searchParams.set('signature', 'demo')
-    url.searchParams.set('_nonce', 'demo')
-    const res = await fetch(url, { method: 'POST', signal: AbortSignal.timeout(this.timeoutMs) })
-    if (!res.ok) throw new Error(`demo server responded ${res.status}`)
-    return res.json() as Promise<Record<string, unknown>>
-  }
-
-  private async consoleData(): Promise<{
-    homes?: Array<{ home_id: number; name: string; owner_id: number; roomlist: Array<{ room_id: number; name: string }> }>
-    devices?: Array<DeviceInfo & { props?: Record<string, unknown> }>
-    events?: ChangeEvent[]
-  }> {
-    const res = await fetch(`${this.baseUrl.replace(/\/$/, '')}/demo/console`, { signal: AbortSignal.timeout(this.timeoutMs) })
-    return res.json() as Promise<{
-      homes?: Array<{ home_id: number; name: string; owner_id: number; roomlist: Array<{ room_id: number; name: string }> }>
-      devices?: Array<DeviceInfo & { props?: Record<string, unknown> }>
-      events?: ChangeEvent[]
-    }>
-  }
-
-  async health() {
-    const res = await fetch(`${this.baseUrl.replace(/\/$/, '')}/demo/health`, { signal: AbortSignal.timeout(this.timeoutMs) })
-    const data = await res.json() as { ok?: boolean; name?: string; devices?: number; region?: string }
-    const consoleData = await this.consoleData()
-    return {
-      ok: data.ok === true,
-      account: data.name ?? 'demo-home',
-      region: data.region ?? 'cn',
-      homes: consoleData.homes?.length ?? 0,
-      devices: consoleData.devices?.length ?? data.devices ?? 0,
-    }
-  }
-
-  async getHomes(): Promise<HomeInfo[]> {
-    const data = await this.consoleData()
-    return (data.homes ?? []).map(h => ({
-      home_id: h.home_id,
-      name: h.name,
-      owner_id: h.owner_id,
-      rooms: (h.roomlist ?? []).map(r => ({ room_id: r.room_id, name: r.name })),
-    }))
-  }
-
-  async getDevices(): Promise<DeviceInfo[]> {
-    const data = await this.consoleData()
-    return (data.devices ?? []).map(d => ({
-      did: d.did,
-      name: d.name,
-      model: d.model,
-      online: d.online,
-      ...(d.room_id !== undefined ? { room_id: d.room_id } : {}),
-    }))
-  }
-
-  async rawCommand(did: string, method: string, params: unknown[]): Promise<unknown> {
-    const data = await this.post('/app/miIO/raw_command', { did, method, params })
-    if (data.code !== 0) throw new Error(`demo raw_command failed: ${String(data.message ?? 'unknown')}`)
-    return data.result
-  }
-
-  async getProps(did: string, _props: string[]): Promise<Record<string, unknown>> {
-    const data = await this.consoleData()
-    const dev = (data.devices ?? []).find(d => d.did === did)
-    return dev?.props ?? {}
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -312,7 +226,6 @@ function cookieHeader(session: Session): string {
 }
 
 export class MiCloudClient implements MiClient {
-  readonly mode = 'cloud' as const
   private session: Session | null = null
   private readonly agent = generateAgent()
   private readonly base: string

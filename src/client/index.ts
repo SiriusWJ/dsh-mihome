@@ -432,7 +432,6 @@ function DashboardView(props: { node: { data: DashboardChatData } }) {
 // ---------------------------------------------------------------------------
 interface AuthStatusBody {
   ok?: boolean
-  mode?: string
   stored?: boolean
   username?: string
   state?: { phase: string; message: string; expiresAt: number | null }
@@ -512,7 +511,6 @@ function SettingsMihome(): ReactNode {
   }
 
   const phase = data?.state?.phase ?? 'idle'
-  const isDemo = data?.mode === 'demo'
   const phaseColor = phase === 'ok'
     ? COLORS.on
     : phase === 'expired' || phase === 'failed'
@@ -528,14 +526,6 @@ function SettingsMihome(): ReactNode {
       createElement('span', { style: { marginLeft: 'auto', fontSize: 12, color: phaseColor, fontWeight: 600 } },
         PHASE_TEXT[phase] ?? phase),
     ),
-    ...(isDemo ? [
-      createElement('div', {
-        key: 'demo', style: {
-          background: 'rgba(251, 191, 36, 0.08)', border: '1px solid rgba(251, 191, 36, 0.4)',
-          borderRadius: 10, padding: '10px 14px', color: COLORS.warn, fontSize: 13,
-        },
-      }, '当前是演示模式（mode: demo），不需要账号。把配置里的 mode 改为 cloud 后即可扫码登录。'),
-    ] : []),
     ...(data?.stored ? [
       createElement('div', {
         key: 'stored', style: {
@@ -557,12 +547,12 @@ function SettingsMihome(): ReactNode {
     createElement('div', { key: 'btns', style: { display: 'flex', gap: 8, flexWrap: 'wrap' } },
       createElement('button', {
         onClick: startQr,
-        disabled: busy || isDemo,
+        disabled: busy,
         style: btnStyle,
       }, qr ? '↻ 刷新二维码' : '生成登录二维码'),
       createElement('button', {
         onClick: logout,
-        disabled: busy || isDemo || !data?.stored,
+        disabled: busy || !data?.stored,
         style: { ...btnStyle, color: COLORS.danger },
       }, '退出登录'),
     ),

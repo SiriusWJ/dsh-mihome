@@ -17,19 +17,9 @@
 |---|---|---|
 | agent 用 `mi_list_devices` 列出你的设备。 | `mi_turn` / `mi_control` 暂停，弹出人工审批框。 | 批准后设备状态更新，`mi_get_state` 确认。 |
 
-**还有 Web UI 仪表盘卡片** —— 调用 `mi_dashboard`，全屋状态直接渲染在对话里：
+**还有 Web UI** —— 会话顶部视图环的「🏠 米家」页签（排在最后）：点击后聊天区域替换为**全屏米家控制台**，房间、按类别分组的设备卡片、实时属性、最近变化，每 3 秒自动刷新，点「聊天」返回。
 
-```
-🏠 米家仪表盘 · 14 台设备 · 12 在线 · 18:32:05
-🏠 客厅  🏠 卧室  🏠 厨房
-💡 灯光        💡 客厅灯  on · brightness 100%      💡 卧室灯  off
-🔌 插座        🔌 客厅插线板  on · 32 W              …
-📊 传感器      🌡️ 客厅温湿度  temperature 22.5°C   💧 卧室温湿度  humidity 52%
-…
-🕐 最近变化    卧室灯: power — → on   18:31
-```
-
-**没有米家账号也能玩** —— 自带演示模拟器（`pnpm demo:mi`）+ 交互式演示页（`docs/demo.html`），5 分钟完整体验。
+**设置页扫码登录** —— DSH **设置 → 米家登录** 一键生成二维码，用米家 App 扫一扫并确认，会话自动保存，无需账号密码、无需开发者申请。
 
 ## 🎯 能做什么？
 
@@ -39,7 +29,7 @@
 |---|---|
 | 「检查米家连接，列出所有设备」 | `mi_health` / `mi_list_devices` 扫描并汇总 |
 | 「客厅灯开着吗？卧室呢？」 | `mi_get_state` 按需读取属性 |
-| 「给我看看家庭仪表盘。」 | `mi_dashboard` 在对话里渲染**实时仪表盘卡片**——分类、房间、最近变化一览无余 |
+| 「给我看看家庭仪表盘。」 | `mi_dashboard` 在对话里渲染**仪表盘卡片** |
 | 「关掉卧室灯。」 | `mi_turn` → **审批弹窗** → 执行 → 状态即时更新 |
 | 「把客厅灯调到 60% 亮度。」 | `mi_control`（set_bright）→ **审批弹窗** → 执行 |
 | 「等空调到 24° 再告诉我。」 | `mi_wait_for_state` 轮询到目标状态 |
@@ -58,9 +48,10 @@
 | `mi_wait_for_state` | 轮询等待属性达到/离开某个状态 | 只读 |
 | `mi_dashboard` | 全屋快照，在 Web UI 渲染为**仪表盘卡片** | 只读 |
 
-**还有全屏控制台**：会话顶部视图环里有一个固定的「🏠 米家」标签（与「聊天 / 轨迹 / 档案 / 记忆」并列），点击后**聊天区域被替换为全屏米家控制台**——房间、按类别分组的设备卡片、实时属性、最近变化，每 3 秒自动刷新，点「聊天」返回；侧栏与标题保持不动。数据来自只读路由 `/dsh-mihome/state`，控制操作仍只走审批门控的工具。
+**界面**
 
-**设置页扫码登录**：DSH **设置 → 米家登录** 页面一键生成二维码，用米家 App 扫一扫并确认，会话自动保存到 `$DSH_HOME/plugin-data/dsh-mihome/session.json`——无需账号密码、无需开发者申请。会话失效时插件自动清除并回退到 `MIHOME_USERNAME` / `MIHOME_PASSWORD` 登录；也可在设置页「退出登录」手动清除。
+- **顶部视图环「🏠 米家」页签**（最后一位）：点击后聊天区域替换为全屏米家控制台——房间、归类设备卡片、实时属性、最近变化，每 3 秒自动刷新，数据来自只读路由 `/dsh-mihome/state`；侧栏与标题保持不动，点「聊天」返回。
+- **设置 → 米家登录**：二维码扫码登录（米家 App 扫一扫 + 确认），状态轮询（等待/已提交/成功/过期/失败）、退出登录；会话保存到 `$DSH_HOME/plugin-data/dsh-mihome/session.json`。
 
 ## 📦 安装
 
@@ -71,42 +62,10 @@
 dsh plugin --profile web add dsh-mihome
 
 # 或从 GitHub 安装（源码安装，pnpm 会在安装时自动构建）：
-# dsh plugin --profile web add github:<owner>/dsh-mihome
+# dsh plugin --profile web add github:SiriusWJ/dsh-mihome
 ```
 
 安装后重启 `dsh --profile web`。可在 **Settings → Plugins** 管理。
-
-## 🧪 没有米家账号？先玩演示模式
-
-```sh
-git clone https://github.com/SiriusWJ/dsh-mihome
-cd dsh-mihome
-pnpm install
-pnpm demo:mi          # 在 http://127.0.0.1:8125 起一个假的米家云
-```
-
-在 profile 的 `cordis.patch.yml` 里配置：
-
-```yaml
-- id: mihome
-  config:
-    mode: demo
-    baseUrl: http://127.0.0.1:8125
-```
-
-然后启动 dsh 试试：
-
-> 「检查米家连接，然后列出所有设备。」
->
-> 「把卧室灯调到 60 亮度。」——会弹出审批请求；批准后 `mi_get_state` 显示 `brightness: 60`。
->
-> 「关掉客厅里所有的灯。」
-
-模拟器里的温度传感器每几秒漂移一次，所以仪表盘和「最近变化」永远有新数据。
-
-**想完全不启动 dsh 就先看效果？** 用浏览器打开 [`docs/demo.html`](docs/demo.html)：模拟 DSH 对话（工具卡片 + 审批弹窗），右侧实时控制台直连模拟器做真实调用。
-
-可直接粘贴的配置（演示 / 真实米家 / 关闭审批）见 [`examples/cordis.patch.yml`](examples/cordis.patch.yml)。
 
 ## ⚙️ 配置
 
@@ -115,7 +74,6 @@ pnpm demo:mi          # 在 http://127.0.0.1:8125 起一个假的米家云
 ```yaml
 - id: mihome
   config:
-    mode: cloud                # cloud 或 demo
     region: cn                 # 米家账号区域：cn / de / ru / us / tw / sg / in…
     usernameEnv: MIHOME_USERNAME   # 存放账号的环境变量名
     passwordEnv: MIHOME_PASSWORD   # 存放密码的环境变量名
@@ -126,25 +84,25 @@ pnpm demo:mi          # 在 http://127.0.0.1:8125 起一个假的米家云
     recentBufferSize: 50       # 最近变化缓冲大小
 ```
 
-然后带上环境变量启动：
+### 登录方式（二选一，扫码优先）
 
-```sh
-MIHOME_USERNAME=<米家账号> MIHOME_PASSWORD=<米家密码> dsh --profile web
-```
+1. **扫码登录（推荐）**：DSH **设置 → 米家登录** → 生成登录二维码 → 米家 App 扫一扫并确认。会话自动保存，无需在配置里写任何账号。
+2. **环境变量/密码**：`MIHOME_USERNAME=<米家账号> MIHOME_PASSWORD=<米家密码> dsh --profile web`，或 `username` / `password` 写进配置（不推荐）。凭证通过 [credentials 接缝](https://github.com/deepseek-ai/deepseek-harness/tree/main/packages/credentials) 每次请求重新解析，轮换无需重启。
 
-`username` / `password` 也可以直接写进配置，但**强烈建议**用 `usernameEnv` / `passwordEnv` 走环境变量或 [credentials 接缝](https://github.com/deepseek-ai/deepseek-harness/tree/main/packages/credentials)——凭证每次请求重新解析，轮换无需重启。
+扫码会话失效（米家 API 返回 -1）时插件会自动清除会话并回退到环境变量登录；也可在设置页「退出登录」手动清除。
 
 ## 🔒 安全说明
 
-- **运输安全**：米家云 API 使用账号密码登录换取一次性会话（serviceToken / ssecurity），插件不在本地保存密码，只在使用时通过凭证接缝读取。
+- **运输安全**：米家云 API 使用账号密码或扫码换取的一次性会话（serviceToken / ssecurity）；插件不保存密码，QR 会话存于插件数据目录（不进 Git、不进对话日志）。
 - **审批闸门**：`mi_turn` / `mi_control` 永远走 harness 的审批接缝（`requireApproval: true` 默认开启）——agent 不经你同意碰不了你的家。
 - **类别白名单**：`allowedCategories` 是第二道保险，设置后其他类别的控制调用直接被拒绝，且设备类别解析失败时**默认拒绝**（最小权限）。
-- **账号安全**：建议开启米家 App 的「设备授权」验证；如账号触发验证码/2FA 登录（部分账号会有安全风控），当前版本会给出明确报错——这种情况请用无 2FA 的账号或等待风控解除。
+- **路由保护**：`/dsh-mihome/*`（含扫码/状态路由）带同源校验；`/dsh-mihome/state` 只读。
 
 ## ⚠️ 已知限制
 
 - 云 API（`account.xiaomi.com` / `api.io.mi.com`）**非官方文档**，接口可能随米家 App 更新而变化；本插件按社区验证过的登录/签名流程实现（参考 [Xiaomi-cloud-tokens-extractor](https://github.com/PiotrMachowski/Xiaomi-cloud-tokens-extractor) / python-miio）。
-- 不支持的场景：米家账号需验证码/2FA；分组设备（`get_split_device` 的子设备）属性读取可能受限。
+- 米家账号触发验证码/2FA 风控时，请改用**扫码登录**（二维码流程不受影响），或等待风控解除。
+- 分组设备（`get_split_device` 的子设备）属性读取可能受限。
 - 本地直连（miIO UDP + 设备 token）规划中，接入后不依赖云端即可控制局域网设备。
 
 ## 🛠 开发
@@ -153,12 +111,12 @@ MIHOME_USERNAME=<米家账号> MIHOME_PASSWORD=<米家密码> dsh --profile web
 pnpm install
 pnpm typecheck   # 针对 @deepseek-ai/* 类型做严格 TS 检查
 pnpm build       # 打包 lib/（ESM + d.ts）
-pnpm test        # 签名/加密原语 + 演示服务器端到端测试
+pnpm test        # 签名/加密原语 + QR 登录/会话持久化测试
 ```
 
 ## 📋 兼容性
 
-- Host 端零运行时依赖：Node 内置 `crypto` / `fetch` + 标准库，无 MQTT、无额外守护进程。
+- Host 端零运行时依赖：Node 内置 `crypto` / `fetch` / `fs` + 标准库，无 MQTT、无额外守护进程。
 - 已针对 npm 发布的 `@deepseek-ai/dsh@0.1.1-rc.2` 类型验证；harness 更新导致不兼容请提 issue。
 
 ## 📄 许可证

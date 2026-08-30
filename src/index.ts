@@ -4,7 +4,7 @@ import { credentialRef, type CredentialRef, type ResolvedCredential } from '@dee
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { Config as ConfigSchema, type Config } from './config'
-import { MiCloudClient, DemoMiClient, categoryOf, type MiClient } from './mi'
+import { MiCloudClient, categoryOf } from './mi'
 import { QrLoginManager, QrSessionStore } from './qr'
 import { registerTools, cachedDevices, ChangeBuffer, buildDashboardSnapshot } from './tools'
 
@@ -45,24 +45,18 @@ export function apply(ctx: Context, config: Config) {
   )
   const sessionStore = new QrSessionStore(sessionFile)
 
-  let qrManager: QrLoginManager | null = null
+  const client = new MiCloudClient({
+    region: config.region,
+    timeoutMs: config.timeoutMs,
+    resolveUsername,
+    resolvePassword,
+    sessionStore,
+  })
 
-  const client: MiClient = config.mode === 'demo'
-    ? new DemoMiClient(config.baseUrl, config.timeoutMs)
-    : new MiCloudClient({
-        region: config.region,
-        timeoutMs: config.timeoutMs,
-        resolveUsername,
-        resolvePassword,
-        sessionStore,
-      })
-
-  if (client instanceof MiCloudClient) {
-    qrManager = new QrLoginManager(sessionStore, async (session) => {
-      client.setSession({ userId: session.userId, serviceToken: session.serviceToken, ssecurity: session.ssecurity })
-    })
-    ctx.effect(() => () => qrManager?.dispose(), 'dsh-mihome.qr')
-  }
+  const qrManager = new QrLoginManager(sessionStore, async (session) => {
+    client.setSession({ userId: session.userId, serviceToken: session.serviceToken, ssecurity: session.ssecurity })
+  })
+  ctx.effect(() => () => qrManager.dispose(), 'dsh-mihome.qr')
 
   const changes = new ChangeBuffer(config.recentBufferSize)
 
@@ -118,12 +112,8 @@ export function apply(ctx: Context, config: Config) {
         }
       },
     }), 'dsh-mihome.web')
-    // The state route could also feed the QR login status page; register the
-    // auth surface next to it. All auth routes are same-origin guarded.
-
-    // Auth routes are registered in BOTH modes so the settings page always
-    // finds them; demo mode answers with a friendly hint instead of starting
-    // QR against the cloud.
+    // Auth routes (settings page QR login). All auth routes are same-origin
+    // guarded.
     ctx.effect(() => webServer.register({
       kind: 'exact',
       path: '/dsh-mihome/auth/status',
@@ -135,10 +125,9 @@ export function apply(ctx: Context, config: Config) {
         const stored = await sessionStore.load()
         sendJson(res, 200, {
           ok: true,
-          mode: config.mode,
           stored: stored !== null,
           username: config.username || '',
-          state: qrManager?.state ?? { phase: 'idle', message: '演示模式', expiresAt: null },
+          state: qrManager.state,
         })
       },
     }), 'dsh-mihome.auth.status')
@@ -149,14 +138,6 @@ export function apply(ctx: Context, config: Config) {
       handler: async (req, res) => {
         if (!sameOrigin(req)) {
           sendJson(res, 403, { ok: false, error: 'cross-origin request rejected' })
-          return
-        }
-        if (!qrManager || config.mode !== 'cloud') {
-          sendJson(res, 200, {
-            ok: false,
-            error: '演示模式无需登录：把配置里的 mode 改为 cloud 后再扫码。',
-            state: { phase: 'idle', message: '演示模式', expiresAt: null },
-          })
           return
         }
         const result = await qrManager.start()
@@ -177,7 +158,7 @@ export function apply(ctx: Context, config: Config) {
           return
         }
         await sessionStore.clear()
-        if (client instanceof MiCloudClient) client.clearSession()
+        client.clearSession()
         sendJson(res, 200, { ok: true })
       },
     }), 'dsh-mihome.auth.logout')

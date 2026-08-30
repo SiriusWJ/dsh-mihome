@@ -137,7 +137,7 @@ export function registerTools(
     description:
       'Check the Mi Home connection and return account/region info plus ' +
       'the number of homes and devices. Call this first to verify the plugin ' +
-      'is configured (cloud credentials or demo server).',
+      'is configured (QR login in Settings → 米家登录, or cloud credentials).',
     parameters: {},
     output: {
       schema: {
@@ -145,7 +145,6 @@ export function registerTools(
         additionalProperties: true,
         properties: {
           ok: { type: 'boolean' },
-          mode: { type: 'string' },
           account: { type: 'string' },
           region: { type: 'string' },
           homes: { type: 'number' },
@@ -153,11 +152,11 @@ export function registerTools(
         },
       },
       render: (_args, value) => {
-        const v = value as { ok?: boolean; mode?: string; account?: string; region?: string; homes?: number; devices?: number }
+        const v = value as { ok?: boolean; account?: string; region?: string; homes?: number; devices?: number }
         return text(
           v.ok
-            ? `Mi Home reachable: account "${v.account}" (region ${v.region ?? 'unknown'}, ${v.homes ?? 0} 个家庭, ${v.devices ?? 0} 台设备, mode: ${v.mode ?? 'cloud'})`
-            : 'Mi Home unreachable: 请检查账号配置（MIHOME_USERNAME / MIHOME_PASSWORD）或演示服务器',
+            ? `Mi Home reachable: account "${v.account}" (region ${v.region ?? 'unknown'}, ${v.homes ?? 0} 个家庭, ${v.devices ?? 0} 台设备)`
+            : 'Mi Home unreachable: 请确认已扫码登录（设置 → 米家登录）或配置账号（MIHOME_USERNAME / MIHOME_PASSWORD）',
         )
       },
     },
@@ -165,7 +164,6 @@ export function registerTools(
       const health = await client.health()
       return {
         ok: health.ok,
-        mode: client.mode,
         account: health.account,
         region: health.region,
         homes: health.homes,

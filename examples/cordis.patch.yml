@@ -4,43 +4,33 @@
 # 管理界面：Settings → Plugins
 
 # ─────────────────────────────────────────────────────────────
-# 方案 A：演示模式（没有真实米家账号也能完整体验）
-# 先启动模拟器：cd dsh-mihome && pnpm demo:mi
-# 模拟器地址 http://127.0.0.1:8125
+# 推荐：扫码登录（无需账号密码写进配置）
+# 1) 保持下方默认配置，重启 dsh
+# 2) 打开 DSH 设置 → 米家登录 → 生成登录二维码
+# 3) 米家 App 扫一扫并确认 → 会话自动保存到
+#    $DSH_HOME/plugin-data/dsh-mihome/session.json
 # ─────────────────────────────────────────────────────────────
 - id: mihome
   config:
-    mode: demo
-    baseUrl: http://127.0.0.1:8125
-    timeoutMs: 15000
+    region: cn            # 按账号地区：cn / de / ru / us / tw / sg / in…
     requireApproval: true
-    allowedCategories: []
-    dashboardPropsLimit: 30
-    recentBufferSize: 50
+    allowedCategories: [] # 可控制类别白名单，例如 [light, outlet, climate]；留空 = 全部允许
 
 # ─────────────────────────────────────────────────────────────
-# 方案 B：真实米家（云 API，需要米家账号）
-# 1) 设两个环境变量（或 profile .env）：
-#    MIHOME_USERNAME=<你的米家账号>
-#    MIHOME_PASSWORD=<你的米家密码>
-# 2) region 按账号地区：cn / de / ru / us / tw / sg / in…
+# 备选：环境变量登录（适合脚本化/CI）
+#   启动：MIHOME_USERNAME=<账号> MIHOME_PASSWORD=<密码> dsh --profile web
+# 扫码会话优先；会话失效时自动回退到环境变量。
 # ─────────────────────────────────────────────────────────────
 # - id: mihome
 #   config:
-#     mode: cloud
 #     region: cn
 #     usernameEnv: MIHOME_USERNAME
 #     passwordEnv: MIHOME_PASSWORD
-#     requireApproval: true
-#     allowedCategories: [light, outlet, climate]   # 可选：可控制类别白名单，留空 = 全部允许
-#
-# 启动：MIHOME_USERNAME=<账号> MIHOME_PASSWORD=<密码> dsh --profile web
 
 # ─────────────────────────────────────────────────────────────
-# 方案 C：完全关掉审批（仅建议在可信、隔离的环境用）
+# 完全关掉审批（仅建议在可信、隔离的环境用）
 # ─────────────────────────────────────────────────────────────
 # - id: mihome
 #   config:
-#     mode: cloud
 #     region: cn
 #     requireApproval: false

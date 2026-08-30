@@ -29,7 +29,6 @@
     "build": "tsdown && tsdown --config tsdown.client.config.ts && tsdown --config tsdown.client.dts.config.ts && node -e \"const fs=require('node:fs');fs.renameSync('lib/client-dts.d.ts','lib/client.d.ts');fs.rmSync('lib/client-dts.js',{force:true});fs.rmSync('lib/client-dts.js.map',{force:true})\"",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "vitest run",
-    "demo:mi": "node scripts/demo-mi.mjs",
     "prepare": "tsdown --config tsdown.prepare.config.ts && tsdown --config tsdown.client.config.ts && tsdown --config tsdown.client.dts.config.ts && node -e \"const fs=require('node:fs');fs.renameSync('lib/client-dts.d.ts','lib/client.d.ts');fs.rmSync('lib/client-dts.js',{force:true});fs.rmSync('lib/client-dts.js.map',{force:true})\""
   },
   "keywords": [

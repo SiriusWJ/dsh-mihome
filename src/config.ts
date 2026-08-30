@@ -1,10 +1,6 @@
 import Schema from '@deepseek-ai/schemastery'
 
 export interface Config {
-  /** 'cloud' = real Mi Home cloud; 'demo' = local demo simulator. */
-  mode: 'cloud' | 'demo'
-  /** Demo server base URL (used when mode = demo). */
-  baseUrl: string
   /** Mi Cloud region: cn | de | ru | us | tw | sg | in | … */
   region: string
   /** Xiaomi account username (fallback: usernameEnv). */
@@ -28,15 +24,6 @@ export interface Config {
 }
 
 export const Config: Schema<Config> = Schema.object({
-  mode: Schema.union([
-    Schema.const('cloud').description('Connect to the real Mi Home cloud'),
-    Schema.const('demo').description('Use the local demo simulator (scripts/demo-mi.mjs)'),
-  ])
-    .description('Connection mode')
-    .default('cloud'),
-  baseUrl: Schema.string()
-    .description('Demo server base URL (mode = demo)')
-    .default('http://127.0.0.1:8125'),
   region: Schema.string()
     .description('Mi Cloud region, e.g. cn, de, ru, us, tw, sg, in')
     .default('cn'),

@@ -5,18 +5,16 @@
 # Users override these values in their own profile's cordis.patch.yml, e.g.:
 #   - id: mihome
 #     config:
-#       mode: cloud
 #       region: cn
 - insert:
     - id: mihome
       name: dsh-mihome
       config:
-        mode: cloud
         region: cn
-        baseUrl: http://127.0.0.1:8125
         usernameEnv: MIHOME_USERNAME
         passwordEnv: MIHOME_PASSWORD
         timeoutMs: 15000
         requireApproval: true
         allowedCategories: []
+        dashboardPropsLimit: 30
         recentBufferSize: 50
