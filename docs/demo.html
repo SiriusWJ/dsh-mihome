@@ -1,0 +1,312 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>dsh-mihome · 交互式演示</title>
+<style>
+  :root {
+    --bg: #0e1013; --panel: #16191e; --panel2: #1c2026; --border: #262b33;
+    --text: #e6e9ee; --muted: #8b93a1; --accent: #4d7cfe; --accent2: #6ee7b7;
+    --danger: #f87171; --warn: #fbbf24;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font: 14px/1.6 -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; padding: 24px; }
+  .wrap { max-width: 1100px; margin: 0 auto; }
+  header { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; flex-wrap: wrap; }
+  header h1 { font-size: 20px; font-weight: 600; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--danger); display: inline-block; }
+  .dot.online { background: var(--accent2); box-shadow: 0 0 8px var(--accent2); }
+  .tag { font-size: 12px; color: var(--muted); border: 1px solid var(--border); border-radius: 99px; padding: 2px 10px; }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  @media (max-width: 900px) { .cols { grid-template-columns: 1fr; } }
+  .panel { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; }
+  .panel > .ph { padding: 10px 14px; border-bottom: 1px solid var(--border); font-weight: 600; font-size: 13px; color: var(--muted); display: flex; justify-content: space-between; align-items: center; }
+  .chat { padding: 14px; display: flex; flex-direction: column; gap: 12px; min-height: 520px; max-height: 640px; overflow-y: auto; }
+  .msg { display: flex; gap: 10px; }
+  .msg .avatar { width: 26px; height: 26px; border-radius: 8px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; font-size: 13px; }
+  .u .avatar { background: #2a3242; }
+  .a .avatar { background: linear-gradient(135deg, #1e3a8a, #4d7cfe); }
+  .bubble { background: var(--panel2); border: 1px solid var(--border); border-radius: 10px; padding: 8px 12px; max-width: 86%; white-space: pre-wrap; }
+  .u .bubble { background: #22293a; }
+  .card { border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: #12151a; }
+  .card .ch { display: flex; align-items: center; gap: 8px; padding: 6px 12px; background: #1a1e25; border-bottom: 1px solid var(--border); font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12px; }
+  .card .ch .icon { color: var(--accent); }
+  .card .cb { padding: 10px 12px; font-size: 13px; white-space: pre-wrap; }
+  .card .cb.ok { color: var(--accent2); }
+  .card .cb.err { color: var(--danger); }
+  .card.pending .cb { color: var(--muted); }
+  .card .kbd { color: var(--warn); }
+  .dash { border: 1px solid var(--border); border-radius: 10px; background: #12151a; overflow: hidden; }
+  .dash .dh { display: flex; gap: 8px; padding: 8px 12px; font-size: 14px; font-weight: 700; }
+  .dash .dh .meta { flex: 1; text-align: right; font-size: 11px; color: var(--muted); font-weight: 400; }
+  .dash .chips { display: flex; gap: 6px; flex-wrap: wrap; padding: 0 12px 8px; }
+  .chip { font-size: 12px; color: var(--text); background: var(--panel2); border: 1px solid var(--border); border-radius: 99px; padding: 3px 10px; }
+  .dash .grp { padding: 2px 12px 8px; }
+  .dash .grp .gt { color: var(--muted); font-size: 11px; margin: 4px 0; }
+  .dash .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+  .dash .row { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 8px; background: var(--panel2); border: 1px solid var(--border); }
+  .dash .row .name { flex: 1; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .dash .row .val { font-size: 12px; font-weight: 600; color: var(--accent); }
+  .dash .row.off .val { color: var(--muted); }
+  .dash .row .st { font-size: 12px; font-weight: 600; }
+  .on { color: var(--accent2); } .off { color: var(--muted); }
+  .dash .ev { border-top: 1px solid var(--border); padding: 8px 12px; }
+  .dash .ev .et { color: var(--muted); font-size: 11px; margin-bottom: 4px; }
+  .dash .ev .ei { color: var(--muted); font-size: 12px; display: flex; gap: 6px; }
+  .dash .ev .ei .tm { margin-left: auto; }
+  .btn { background: var(--accent); color: #fff; border: 0; border-radius: 8px; padding: 7px 14px; font-size: 13px; cursor: pointer; }
+  .btn:hover { filter: brightness(1.1); }
+  .btn.ghost { background: transparent; border: 1px solid var(--border); color: var(--text); }
+  .btn:disabled { opacity: .5; cursor: default; }
+  .btn.danger { background: var(--danger); }
+  .console { padding: 14px; display: flex; flex-direction: column; gap: 12px; flex: 1; }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; }
+  .out { background: #101318; border: 1px solid var(--border); border-radius: 8px; padding: 10px; font-family: ui-monospace, Menlo, monospace; font-size: 12px; min-height: 90px; max-height: 260px; overflow-y: auto; white-space: pre-wrap; color: var(--muted); }
+  .out b { color: var(--text); }
+  .states { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; }
+  .st { background: #101318; border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; }
+  .st .id { font-family: ui-monospace, Menlo, monospace; font-size: 11px; color: var(--muted); }
+  .st .val { font-size: 13px; margin-top: 2px; }
+  .st.on .val { color: var(--accent2); }
+  .st.off .val { color: var(--muted); }
+  .modal-back { position: fixed; inset: 0; background: rgba(0,0,0,.55); display: none; align-items: center; justify-content: center; z-index: 50; }
+  .modal-back.show { display: flex; }
+  .modal { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; width: 440px; max-width: 92vw; padding: 18px; }
+  .modal h3 { font-size: 15px; margin-bottom: 6px; }
+  .modal .cmd { font-family: ui-monospace, Menlo, monospace; background: #101318; border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; margin: 10px 0; font-size: 13px; }
+  .modal .hint { color: var(--muted); font-size: 12px; margin-bottom: 14px; }
+  .modal .mbtns { display: flex; gap: 8px; justify-content: flex-end; }
+  .foot { margin-top: 16px; color: var(--muted); font-size: 12px; text-align: center; }
+  .foot code { background: var(--panel2); border: 1px solid var(--border); border-radius: 4px; padding: 1px 6px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>🏠 dsh-mihome <span class="tag">交互式演示</span></h1>
+    <span id="liveDot" class="dot"></span><span id="liveTxt" style="font-size:13px;color:var(--muted)">模拟器未连接</span>
+  </header>
+
+  <div class="cols">
+    <!-- 左：模拟对话 -->
+    <div class="panel">
+      <div class="ph"><span>模拟 DSH 对话（演示效果）</span><button id="playBtn" class="btn">▶ 播放演示</button></div>
+      <div id="chat" class="chat"></div>
+    </div>
+
+    <!-- 右：实时控制台 -->
+    <div class="panel">
+      <div class="ph"><span>实时控制台 · 连接本地模拟器</span><span id="refreshBtn" class="btn ghost" style="cursor:pointer">刷新状态</span></div>
+      <div class="console">
+        <div class="row">
+          <button class="btn ghost" data-act="health">检查连接</button>
+          <button class="btn ghost" data-act="list">列出设备</button>
+          <button class="btn ghost" data-act="lightLiving">开客厅灯</button>
+          <button class="btn" data-act="bedOn">开卧室灯 (60)</button>
+          <button class="btn danger" data-act="bedOff">关卧室灯</button>
+        </div>
+        <div class="row" id="roomChips"></div>
+        <div class="ph" style="border:0;padding:0"><span style="color:var(--muted);font-size:12px">设备状态</span></div>
+        <div class="states" id="states"></div>
+        <div class="ph" style="border:0;padding:0"><span style="color:var(--muted);font-size:12px">🕐 最近变化</span></div>
+        <div class="out" id="events" style="min-height:80px"></div>
+        <div class="out" id="haout" style="min-height:40px; max-height:120px"></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="foot">
+    模拟器：<code>node scripts/demo-mi.mjs</code>（http://127.0.0.1:8125）· 任意 token 可用 · 无需真实米家账号
+  </div>
+</div>
+
+<div class="modal-back" id="modalBack">
+  <div class="modal">
+    <h3>⚠️ 需要批准</h3>
+    <div style="color:var(--muted);font-size:13px">dsh-mihome 请求调用米家设备服务（工具 <b>mi_control</b>）</div>
+    <div class="cmd" id="modalCmd"></div>
+    <div class="hint">所有改变状态的调用都停在人工审批前；拒绝则设备不受影响。</div>
+    <div class="mbtns">
+      <button class="btn danger" id="modalReject">拒绝</button>
+      <button class="btn" id="modalApprove">批准并执行</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const BASE = 'http://127.0.0.1:8125'
+
+// ---------------------------------------------------------------------------
+// helpers
+// ---------------------------------------------------------------------------
+const $ = id => document.getElementById(id)
+function esc(s) { return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') }
+
+function addMsg(role, text) {
+  const div = document.createElement('div')
+  div.className = `msg ${role}`
+  div.innerHTML = `<div class="avatar">${role === 'u' ? '👤' : '🐋'}</div><div class="bubble">${esc(text)}</div>`
+  $('chat').appendChild(div)
+  $('chat').scrollTop = $('chat').scrollHeight
+}
+
+function addToolCard(title, body, cls = '') {
+  const div = document.createElement('div')
+  div.className = `card ${cls}`
+  div.innerHTML = `<div class="ch"><span class="icon">⚙️</span><span>${esc(title)}</span></div><div class="cb ${cls}">${body}</div>`
+  $('chat').appendChild(div)
+  $('chat').scrollTop = $('chat').scrollHeight
+  return div
+}
+
+function addDashboard(snapshot) {
+  const groups = []
+  const groupFor = (d) => {
+    const m = d.model
+    if (m.startsWith('yeelink.light') || m.startsWith('xiaomi.light') || m.startsWith('mijia.light')) return '💡 灯光'
+    if (m.startsWith('zimi.plug') || m.startsWith('chuangmi.plug') || m.startsWith('mijia.plug')) return '🔌 插座'
+    if (m.startsWith('lumi.sensor') || m.startsWith('mijia.sensor')) return '📊 传感器'
+    if (m.includes('aircondition')) return '❄️ 空调'
+    if (m.includes('tv')) return '📺 影音'
+    if (m.includes('vacuum') || m.includes('purifier') || m.includes('humidifier') || m.includes('washer')) return '🧹 清洁'
+    if (m.includes('camera')) return '📷 摄像头'
+    if (m.includes('lock')) return '🔒 门锁'
+    if (m.includes('fan')) return '🌀 风扇'
+    return '🏠 其他'
+  }
+  const by = new Map()
+  for (const d of snapshot.devices) {
+    const g = groupFor(d)
+    if (!by.has(g)) by.set(g, [])
+    by.get(g).push(d)
+  }
+  for (const [g, items] of by) groups.push({ g, items })
+
+  let html = `<div class="dh">🏠 米家仪表盘<span class="meta">${snapshot.devices.length} 个设备 · ${snapshot.devices.filter(d => d.online).length} 在线 · ${new Date().toLocaleTimeString('zh-CN', { hour12: false })}</span></div>`
+  html += `<div class="chips">${snapshot.homes[0].roomlist.map(r => `<span class="chip">🏠 ${esc(r.name)}</span>`).join('')}</div>`
+  for (const { g, items } of groups) {
+    html += `<div class="grp"><div class="gt">${esc(g)}</div><div class="grid2">`
+    html += items.map(d => {
+      const on = d.props.power === 1
+      const valText = Object.entries(d.props).filter(([k]) => !['power'].includes(k)).slice(0, 1)
+        .map(([k, v]) => `${k}: ${v}`).join(' · ') || (on ? 'on' : 'off')
+      return `<div class="row ${on ? '' : 'off'}"><span>${esc(d.name)}</span><span class="val">${esc(valText)}</span><span class="st ${on ? 'on' : 'off'}">${on ? 'on ●' : 'off ○'}</span></div>`
+    }).join('')
+    html += `</div></div>`
+  }
+  if (snapshot.events.length) {
+    html += `<div class="ev"><div class="et">🕐 最近变化</div>${snapshot.events.slice(0, 5).map(e =>
+      `<div class="ei"><span>${esc(e.name)}: ${e.changes.map(c => `${c[0]} ${c[1]} → ${c[2]}`).join('，')}</span><span class="tm">${new Date(e.time).toLocaleTimeString('zh-CN', { hour12: false })}</span></div>`
+    ).join('')}</div>`
+  }
+  const div = document.createElement('div')
+  div.className = 'dash'
+  div.innerHTML = html
+  $('chat').appendChild(div)
+  $('chat').scrollTop = $('chat').scrollHeight
+}
+
+// ---------------------------------------------------------------------------
+// playback script (left side)
+// ---------------------------------------------------------------------------
+const sleep = ms => new Promise(r => setTimeout(r, ms))
+
+let playing = false
+$('playBtn').onclick = async () => {
+  if (playing) return
+  playing = true
+  $('playBtn').disabled = true
+  $('chat').innerHTML = ''
+  addMsg('u', '检查米家连接，列出所有设备')
+  await sleep(600)
+  addToolCard('mi_health', '✅ Demo Home reachable · 演示之家 · 账号 demo@mihome.local · 区域 cn', 'ok')
+  await sleep(400)
+  addToolCard('mi_list_devices', '14 台设备：客厅灯(light-living-0001)、卧室灯、客厅插线板、全屋功率监测、客厅温湿度、中央空调、电视、扫地机器人、门锁、净化器、摄像头、风扇…')
+  await sleep(900)
+  addMsg('u', '把客厅灯调到 60% 亮度')
+  await sleep(600)
+  addToolCard('mi_control', '⏸ 等待人工批准：set_bright 目标 客厅灯(light-living-0001) 参数 {"brightness":60}', 'pending')
+  // Show approval modal (mimics the harness approval seam)
+  const cmd = $('modalCmd')
+  cmd.textContent = 'set_bright 目标: 客厅灯 (light-living-0001) 数据: {"brightness": 60}'
+  $('modalBack').classList.add('show')
+  const decision = await new Promise(resolve => {
+    $('modalApprove').onclick = () => { $('modalBack').classList.remove('show'); resolve('approve') }
+    $('modalReject').onclick = () => { $('modalBack').classList.remove('show'); resolve('reject') }
+  })
+  await sleep(300)
+  if (decision === 'approve') {
+    await fetch(`${BASE}/app/miIO/raw_command?data=${encodeURIComponent(JSON.stringify({ did: 'light-living-0001', method: 'set_bright', params: [60] }))}`, { method: 'POST' })
+    addToolCard('mi_dashboard', '🏠 米家仪表盘已就绪', 'ok')
+    const snap = await fetch(`${BASE}/demo/console`).then(r => r.json())
+    addDashboard(snap)
+  } else {
+    addToolCard('mi_control', '❌ 已拒绝：设备未受影响', 'err')
+  }
+  playing = false
+  $('playBtn').disabled = false
+}
+
+// ---------------------------------------------------------------------------
+// live console (right side)
+// ---------------------------------------------------------------------------
+async function refresh() {
+  try {
+    const snap = await fetch(`${BASE}/demo/console`).then(r => r.json())
+    $('liveTxt').textContent = '模拟器已连接'
+    $('liveDot').classList.add('online')
+    $('roomChips').innerHTML = snap.homes[0].roomlist.map(r => `<span class="chip">🏠 ${esc(r.name)}</span>`).join('')
+    $('states').innerHTML = snap.devices.map(d => {
+      const vals = Object.entries(d.props).filter(([k]) => k !== 'power').slice(0, 2)
+        .map(([k, v]) => `${k}: ${v}`).join(' · ')
+      const on = d.props.power === 1
+      return `<div class="st ${on ? 'on' : 'off'}"><div class="id">${esc(d.name)}</div><div class="val">${on ? '● on' : '○ off'}${vals ? ' · ' + esc(vals) : ''}</div></div>`
+    }).join('')
+    $('events').innerHTML = snap.events.slice(0, 6).map(e =>
+      `${esc(e.name)}: ${e.changes.map(c => `${c[0]} ${c[1]} → ${c[2]}`).join('，')}  <span style="color:#4b5563">${new Date(e.time).toLocaleTimeString('zh-CN', { hour12: false })}</span>`
+    ).join('\n') || '(暂无变化)'
+  } catch {
+    $('liveTxt').textContent = '模拟器未连接（请先运行 node scripts/demo-mi.mjs）'
+    $('liveDot').classList.remove('online')
+  }
+}
+$('refreshBtn').onclick = refresh
+
+async function post(path, data) {
+  const u = new URL(BASE + path)
+  if (data) u.searchParams.set('data', JSON.stringify(data))
+  u.searchParams.set('signature', 'demo')
+  u.searchParams.set('_nonce', 'demo')
+  return fetch(u, { method: 'POST' }).then(r => r.json())
+}
+
+document.querySelectorAll('[data-act]').forEach(btn => {
+  btn.onclick = async () => {
+    const act = btn.dataset.act
+    const out = $('haout')
+    if (act === 'health') {
+      out.innerHTML = `→ <b>${esc(JSON.stringify(await fetch(`${BASE}/demo/health`).then(r => r.json())))}</b>`
+    } else if (act === 'list') {
+      const snap = await fetch(`${BASE}/demo/console`).then(r => r.json())
+      out.innerHTML = snap.devices.map(d => `${d.did}  ${d.name}  (${d.model})`).join('\n')
+    } else if (act === 'lightLiving') {
+      const r = await post('/app/miIO/raw_command', { did: 'light-living-0001', method: 'set_power', params: ['on'] })
+      out.innerHTML = `→ ${JSON.stringify(r)}`
+    } else if (act === 'bedOn') {
+      const r = await post('/app/miIO/raw_command', { did: 'light-bedroom-0002', method: 'set_power', params: ['on'] })
+      await post('/app/miIO/raw_command', { did: 'light-bedroom-0002', method: 'set_bright', params: [60] })
+      out.innerHTML = `→ ${JSON.stringify(r)} + brightness=60`
+    } else if (act === 'bedOff') {
+      const r = await post('/app/miIO/raw_command', { did: 'light-bedroom-0002', method: 'set_power', params: ['off'] })
+      out.innerHTML = `→ ${JSON.stringify(r)}`
+    }
+    refresh()
+  }
+})
+
+refresh()
+setInterval(refresh, 2500)
+</script>
+</body>
+</html>

@@ -1,0 +1,46 @@
+# dsh-mihome 示例配置
+# 用法：把下面任意一段贴到你 profile 的 cordis.patch.yml（$DSH_HOME/profiles/<name>/cordis.patch.yml）
+# 后层覆盖前层，改完重启 dsh --profile web 生效。
+# 管理界面：Settings → Plugins
+
+# ─────────────────────────────────────────────────────────────
+# 方案 A：演示模式（没有真实米家账号也能完整体验）
+# 先启动模拟器：cd dsh-mihome && pnpm demo:mi
+# 模拟器地址 http://127.0.0.1:8125
+# ─────────────────────────────────────────────────────────────
+- id: mihome
+  config:
+    mode: demo
+    baseUrl: http://127.0.0.1:8125
+    timeoutMs: 15000
+    requireApproval: true
+    allowedCategories: []
+    dashboardPropsLimit: 30
+    recentBufferSize: 50
+
+# ─────────────────────────────────────────────────────────────
+# 方案 B：真实米家（云 API，需要米家账号）
+# 1) 设两个环境变量（或 profile .env）：
+#    MIHOME_USERNAME=<你的米家账号>
+#    MIHOME_PASSWORD=<你的米家密码>
+# 2) region 按账号地区：cn / de / ru / us / tw / sg / in…
+# ─────────────────────────────────────────────────────────────
+# - id: mihome
+#   config:
+#     mode: cloud
+#     region: cn
+#     usernameEnv: MIHOME_USERNAME
+#     passwordEnv: MIHOME_PASSWORD
+#     requireApproval: true
+#     allowedCategories: [light, outlet, climate]   # 可选：可控制类别白名单，留空 = 全部允许
+#
+# 启动：MIHOME_USERNAME=<账号> MIHOME_PASSWORD=<密码> dsh --profile web
+
+# ─────────────────────────────────────────────────────────────
+# 方案 C：完全关掉审批（仅建议在可信、隔离的环境用）
+# ─────────────────────────────────────────────────────────────
+# - id: mihome
+#   config:
+#     mode: cloud
+#     region: cn
+#     requireApproval: false

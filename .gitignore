@@ -1,0 +1,9 @@
+node_modules/
+lib/
+.upload/
+*.log
+.DS_Store
+.vscode/
+.idea/
+coverage/
+dist/
