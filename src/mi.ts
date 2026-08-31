@@ -549,7 +549,12 @@ export class MiCloudClient implements MiClient {
       if (Number.isNaN(value)) throw new Error(`dsh-mihome: set_bright 需要 1-100 的数值`)
       return this.miotSet(did, 2, 2, value)
     }
-    throw new Error(`dsh-mihome: 方法 ${method} 尚未支持云端映射（当前支持 set_power / set_bright）`)
+    if (method === 'set_mode') {
+      const value = String(params[0] ?? '')
+      if (!value) throw new Error(`dsh-mihome: set_mode 需要一个模式值（如 heat / cool / auto）`)
+      return this.miotSet(did, 2, 4, value)
+    }
+    throw new Error(`dsh-mihome: 方法 ${method} 尚未支持云端映射（当前支持 set_power / set_bright / set_mode）`)
   }
 
   private async miotSet(did: string, siid: number, piid: number, value: unknown): Promise<unknown> {

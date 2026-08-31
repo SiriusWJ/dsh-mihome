@@ -138,7 +138,9 @@ export function apply(ctx: Context, config: Config) {
         }
         const url = new URL((req as { url?: string }).url ?? '/', 'http://127.0.0.1')
         const deviceId = url.searchParams.get('deviceId') ?? ''
+        const action = url.searchParams.get('action') ?? 'power'
         const on = ['1', 'true', 'on'].includes(url.searchParams.get('on') ?? '')
+        const value = url.searchParams.get('value') ?? ''
         if (!deviceId) {
           sendJson(res, 200, { ok: false, error: '缺少 deviceId' })
           return
@@ -159,15 +161,50 @@ export function apply(ctx: Context, config: Config) {
             sendJson(res, 200, { ok: false, error: '设备离线，无法控制' })
             return
           }
-          await client.rawCommand(device.did, 'set_power', [on ? 'on' : 'off'])
-          service.patchDeviceProps(device.did, { power: on ? 1 : 0 })
-          changes.push({
-            did: device.did,
-            name: device.name,
-            changes: [['power', null, on ? 'on' : 'off']],
-            time: new Date().toISOString(),
-          })
-          sendJson(res, 200, { ok: true, deviceId: device.did, name: device.name, on })
+          if (action === 'power') {
+            await client.rawCommand(device.did, 'set_power', [on ? 'on' : 'off'])
+            service.patchDeviceProps(device.did, { power: on ? 1 : 0 })
+            changes.push({
+              did: device.did, name: device.name,
+              changes: [['power', null, on ? 'on' : 'off']],
+              time: new Date().toISOString(),
+            })
+            sendJson(res, 200, { ok: true, deviceId: device.did, name: device.name, on })
+            return
+          }
+          if (action === 'bright') {
+            const bright = Number(value)
+            if (Number.isNaN(bright) || bright < 1 || bright > 100) {
+              sendJson(res, 200, { ok: false, error: '亮度需为 1-100 的数值' })
+              return
+            }
+            await client.rawCommand(device.did, 'set_bright', [bright])
+            service.patchDeviceProps(device.did, { brightness: bright })
+            changes.push({
+              did: device.did, name: device.name,
+              changes: [['brightness', null, bright]],
+              time: new Date().toISOString(),
+            })
+            sendJson(res, 200, { ok: true, deviceId: device.did, name: device.name, action, value: bright })
+            return
+          }
+          if (action === 'mode') {
+            const mode = String(value)
+            if (!mode) {
+              sendJson(res, 200, { ok: false, error: '缺少模式值' })
+              return
+            }
+            await client.rawCommand(device.did, 'set_mode', [mode])
+            service.patchDeviceProps(device.did, { mode })
+            changes.push({
+              did: device.did, name: device.name,
+              changes: [['mode', null, mode]],
+              time: new Date().toISOString(),
+            })
+            sendJson(res, 200, { ok: true, deviceId: device.did, name: device.name, action, value: mode })
+            return
+          }
+          sendJson(res, 200, { ok: false, error: `不支持的 action: ${action}` })
         } catch (err) {
           sendJson(res, 200, { ok: false, error: err instanceof Error ? err.message : String(err) })
         }

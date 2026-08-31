@@ -257,277 +257,243 @@ function useConsoleState(tick: number): ConsoleState | null {
 }
 
 // ---------------------------------------------------------------------------
-// Device cards
+// Device tiles (reference style: dark glass tiles on the room canvas; on +
+// controllable → white tile with a green power circle; click → advanced
+// operations panel)
 // ---------------------------------------------------------------------------
 
 /** Categories the console may switch (power on/off). */
 const CONTROLLABLE: string[] = ['light', 'outlet', 'climate', 'media', 'fan', 'cleaning']
 
-function DeviceCard({ device, busy, onToggle }: { device: DashboardDevice; busy?: boolean; onToggle?: () => void }): ReactNode {
-  const props = Object.entries(device.props ?? {})
-    .filter(([key]) => key !== 'power')
-    .slice(0, 4)
-    .map(([key, value]) => `${key}: ${fmtPropValue(key, value)}`)
-  const power = device.props.power
-  const on = power === 1 || power === '1' || power === 'on' || power === true
-  const controllable = device.online && CONTROLLABLE.includes(categoryOf(device))
-  return createElement('div', {
-    className: 'mihome-card',
-    style: {
-      background: NEO.card,
-      borderRadius: 18,
-      padding: '12px 14px',
-      display: 'flex', flexDirection: 'column', gap: 6,
-    },
-  },
-    createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 10 } },
-      createElement('span', {
-        style: {
-          fontSize: 17, width: 34, height: 34, flex: 'none',
-          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-          borderRadius: 11,
-          background: on ? NEO_GRADIENT : NEO.card,
-          boxShadow: on ? 'none' : neoShadow(3),
-        },
-      }, iconFor(device)),
-      createElement('span', {
-        style: { flex: 1, color: NEO.text, fontSize: 13, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-      }, device.name || device.did),
-      createElement('span', {
-        style: { color: device.online ? (on ? NEO.on : NEO.muted) : NEO.danger, fontSize: 11, fontWeight: 700, whiteSpace: 'nowrap' },
-      }, device.online ? (on ? 'on' : 'off') : '离线'),
-      ...(controllable ? [
-        createElement('button', {
-          key: 'sw', onClick: onToggle, disabled: busy,
-          style: {
-            width: 44, height: 24, borderRadius: 99, padding: 2, border: 'none', flex: 'none',
-            cursor: busy ? 'default' : 'pointer', fontFamily: 'inherit',
-            display: 'inline-flex', alignItems: 'center',
-            justifyContent: on ? 'flex-end' : 'flex-start',
-            background: on ? NEO_GRADIENT : '#dde1ea',
-            boxShadow: on
-              ? 'inset 2px 2px 4px rgba(140, 55, 110, 0.35), inset -2px -2px 4px rgba(255, 255, 255, 0.30)'
-              : 'inset 2px 2px 4px rgba(163, 170, 190, 0.55), inset -2px -2px 4px rgba(255, 255, 255, 0.90)',
-          },
-        },
-          createElement('span', {
-            style: {
-              width: 20, height: 20, borderRadius: '50%',
-              background: on ? '#fff' : '#f4f6fa',
-              boxShadow: '1px 1px 3px rgba(120, 127, 145, 0.40)',
-            },
-          }, busy ? '' : null),
-        ),
-      ] : []),
-    ),
-    createElement('div', {
-      style: { color: NEO.muted, fontSize: 12, minHeight: 16 },
-    }, props.length > 0 ? props.join(' · ') : (device.online ? '—' : '设备离线')),
-    createElement('div', {
-      style: { color: '#a9b0c0', fontSize: 11, fontFamily: 'ui-monospace, Menlo, monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-    }, device.model),
-  )
-}
-
-// ---------------------------------------------------------------------------
-// Card templates — one design per device type (research-backed: thermostat
-// gets a dial, sensors get big-metric tiles, lock/camera get status cards,
-// switches get the pill toggle).
-// ---------------------------------------------------------------------------
-
 function powerOn(device: DashboardDevice): boolean {
   const power = device.props.power
-  return power === 1 || power === '1' || power === 'on' || power === true || power === true
+  return power === 1 || power === '1' || power === 'on' || power === true
 }
 
-function nameStatusRow(device: DashboardDevice): ReactNode {
-  return createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
-    createElement('span', { style: { fontSize: 14, flex: 1, color: NEO.text, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
-      device.name || device.did),
-    createElement('span', { style: { color: device.online ? NEO.muted : NEO.danger, fontSize: 11, fontWeight: 700 } },
-      device.online ? '在线' : '离线'))
-}
-
-/** Inner tile: pressed-in neumorphic well for metrics. */
-const TILE_PRESET = {
-  background: '#e2e6ef',
-  borderRadius: 14,
-  boxShadow: 'inset 3px 3px 6px rgba(163, 170, 190, 0.45), inset -3px -3px 6px rgba(255, 255, 255, 0.95)',
-  display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2,
-  flex: 1, minWidth: 0,
-} as const
-
-/** Climate card — ring dial with mode/temperature (reference screen 2/3). */
-function ThermostatCard({ device, busy, onToggle }: { device: DashboardDevice; busy?: boolean; onToggle?: () => void }): ReactNode {
+/** Short state line under the device name ('开着 100%', '28.2°C 76%', …). */
+function deviceStateText(device: DashboardDevice): string {
+  const props = device.props
   const on = powerOn(device)
-  const temp = Number(device.props.temperature ?? device.props.target_temperature ?? 0) || 0
-  const mode = String(device.props.mode ?? (on ? 'heating' : 'off'))
-  const pct = Math.max(0, Math.min(100, ((temp - 5) / 30) * 100))
-  const controllable = device.online
+  const category = categoryOf(device)
+  if (!device.online) return '离线'
+  if (category === 'sensor') {
+    const t = props.temperature
+    const h = props.humidity
+    return [t != null ? fmtPropValue('temperature', t) : null, h != null ? fmtPropValue('humidity', h) : null]
+      .filter((v): v is string => v !== null)
+      .join(' ')
+  }
+  if (category === 'meter') return props.power_consumption != null ? fmtPropValue('power_consumption', props.power_consumption) : '—'
+  if (category === 'climate') return `${String(props.mode ?? (on ? '加热' : '关'))}${props.temperature != null ? ` ${fmtPropValue('temperature', props.temperature)}` : ''}`
+  if (category === 'lock') return String(props.power ?? props.state ?? '—')
+  if (category === 'camera') return device.online ? '在线' : '离线'
+  const b = props.brightness
+  return `${on ? '开着' : '关'}${b != null ? ` ${fmtPropValue('brightness', b)}` : ''}`
+}
+
+function TileCard({ device, busy, onToggle, onOpen, roomName, stateText }: {
+  device: DashboardDevice
+  busy?: boolean
+  onToggle?: () => void
+  onOpen?: () => void
+  roomName?: string
+  stateText: string
+}): ReactNode {
+  const on = powerOn(device)
+  const controllable = device.online && CONTROLLABLE.includes(categoryOf(device))
+  const white = controllable && on
+  const bg = white ? 'rgba(255,255,255,0.96)' : 'rgba(30,45,38,0.80)'
+  const fg = white ? '#26382e' : '#f1f5f0'
+  const subColor = white ? 'rgba(38,56,46,0.60)' : 'rgba(240,245,241,0.62)'
   return createElement('div', {
-    className: 'mihome-card',
-    style: { background: NEO.card, borderRadius: 18, padding: '14px', display: 'flex', flexDirection: 'column', gap: 10 },
+    className: 'mihome-card', onClick: onOpen,
+    style: {
+      background: bg, borderRadius: 18, padding: '14px', minHeight: 112,
+      display: 'flex', flexDirection: 'column', gap: 10, cursor: 'pointer',
+    },
   },
-    nameStatusRow(device),
-    createElement('div', { style: { display: 'flex', justifyContent: 'center' } },
-      createElement('div', {
-        style: {
-          width: 108, height: 108, borderRadius: '50%', position: 'relative',
-          background: `conic-gradient(from 210deg, #ff7ab8 0% ${pct}%, #e2e6ef ${pct}% 100%)`,
-          boxShadow: neoShadow(6),
-        },
+    createElement('div', { style: { display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 } },
+      createElement('span', { style: { fontSize: 26, opacity: 0.95, filter: 'grayscale(0.2)' } }, iconFor(device)),
+      ...(controllable
+        ? [createElement('button', {
+            key: 'pw', onClick: (e) => { e.stopPropagation(); onToggle?.() }, disabled: busy,
+            style: {
+              width: 38, height: 38, borderRadius: '50%', border: 'none', flex: 'none',
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 15, cursor: busy ? 'default' : 'pointer', fontFamily: 'inherit',
+              background: on ? 'linear-gradient(160deg, #43d08a, #1f9e68)' : 'rgba(16,26,21,0.38)',
+              color: '#fff',
+              boxShadow: on ? '0 4px 12px rgba(24, 158, 104, 0.35)' : 'inset 0 1px 3px rgba(0, 0, 0, 0.30)',
+            },
+          }, '⏻'),
+        ] : [
+          createElement('span', { key: 'st', style: {
+            width: 30, height: 30, borderRadius: '50%', flex: 'none',
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 13, color: 'rgba(255,255,255,0.85)', background: 'rgba(14,22,18,0.30)',
+          } }, device.online ? '⏵' : '⏸'),
+        ]),
+    ),
+    createElement('div', { style: { marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 } },
+      createElement('div', { style: { color: fg, fontSize: 14, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
+        device.name || device.did),
+      createElement('div', { style: { color: subColor, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
+        [roomName, stateText].filter(Boolean).join(' · ') || '—'),
+    ),
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Advanced operations panel (reference: centered dark dialog — name +
+// power circle, big metric, mode circles, more operations)
+// ---------------------------------------------------------------------------
+
+/** Type-specific presets for the panel's circle row. */
+const SHEET_MODES: Record<string, Array<{ label: string; icon: string; value: string }>> = {
+  light: [
+    { label: '柔和', icon: '◐', value: '30' },
+    { label: '适中', icon: '◑', value: '60' },
+    { label: '全亮', icon: '☀', value: '100' },
+  ],
+  climate: [
+    { label: '制冷', icon: '❄', value: 'cool' },
+    { label: '制热', icon: '♨', value: 'heat' },
+    { label: '自动', icon: 'A', value: 'auto' },
+  ],
+}
+
+/** Big-metric line for the panel center (reference: '2 ug/m³' + label). */
+function deviceMetric(device: DashboardDevice): { value: string; unit: string; label: string } {
+  const p = device.props
+  const category = categoryOf(device)
+  if (category === 'sensor') {
+    return p.temperature != null
+      ? { value: String(p.temperature), unit: '°C', label: '温度' }
+      : { value: p.humidity != null ? String(p.humidity) : '--', unit: p.humidity != null ? '%' : '', label: '湿度' }
+  }
+  if (category === 'climate') {
+    return { value: p.temperature != null ? String(Math.round(Number(p.temperature))) : '--', unit: '°', label: String(p.mode ?? '温度') }
+  }
+  if (category === 'meter') {
+    return { value: p.power_consumption != null ? String(p.power_consumption) : '--', unit: 'W', label: '功率' }
+  }
+  if (category === 'lock') {
+    const locked = !/unlock|off|0|false|开/i.test(String(p.power ?? p.state ?? '—'))
+    return { value: locked ? '已上锁' : '未上锁', unit: '', label: '状态' }
+  }
+  return { value: powerOn(device) ? '开' : '关', unit: '', label: '电源' }
+}
+
+function DeviceSheet({ device, roomName, busy, onClose, onAction }: {
+  device: DashboardDevice
+  roomName?: string
+  busy: boolean
+  onClose: () => void
+  onAction: (action: string, value?: string) => void
+}): ReactNode {
+  const [more, setMore] = useState(false)
+  const on = powerOn(device)
+  const modes = SHEET_MODES[categoryOf(device)] ?? []
+  const metric = deviceMetric(device)
+  const activeMode = (mode: { value: string }): boolean =>
+    categoryOf(device) === 'light'
+      ? String(device.props.brightness ?? '') === String(mode.value)
+      : String(device.props.mode ?? '').toLowerCase() === String(mode.value)
+
+  return createElement('div', {
+    style: {
+      position: 'fixed', inset: 0, zIndex: 600,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      background: 'rgba(10, 14, 12, 0.55)',
+    },
+    onClick: onClose,
+  },
+    createElement('div', {
+      onClick: (e: React.MouseEvent) => e.stopPropagation(),
+      key: device.did,
+      style: {
+        width: 'min(500px, 92vw)',
+        background: 'rgba(19, 25, 22, 0.97)',
+        borderRadius: 26, padding: '22px 24px 12px',
+        color: '#eef3ee', display: 'flex', flexDirection: 'column', gap: 16,
+        boxShadow: '0 26px 70px rgba(0, 0, 0, 0.5)',
       },
-        createElement('div', {
+    },
+      // Header: name + power circle
+      createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 10 } },
+        createElement('div', { style: { flex: 1, minWidth: 0 } },
+          createElement('div', { style: { fontSize: 16, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
+            device.name || device.did),
+          createElement('div', { style: { fontSize: 12, color: 'rgba(238,243,238,0.55)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
+            [roomName, device.model].filter(Boolean).join(' · ')),
+        ),
+        createElement('button', {
+          onClick: () => onAction('power', on ? '0' : '1'), disabled: busy,
           style: {
-            position: 'absolute', inset: 14, borderRadius: '50%', background: NEO.card,
-            display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-            boxShadow: 'inset 3px 3px 7px rgba(163, 170, 190, 0.45), inset -3px -3px 7px rgba(255, 255, 255, 0.95)',
+            width: 40, height: 40, borderRadius: '50%', border: 'none', flex: 'none',
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: 16, cursor: busy ? 'default' : 'pointer', fontFamily: 'inherit',
+            background: on ? 'linear-gradient(160deg, #35c7b0, #1f9c87)' : 'rgba(255,255,255,0.10)',
+            color: '#fff',
+          },
+        }, '⏻'),
+      ),
+      // Big metric
+      createElement('div', { style: { textAlign: 'center', padding: '6px 0' } },
+        createElement('div', { style: { display: 'inline-flex', alignItems: 'baseline', gap: 4 } },
+          createElement('span', { style: { fontSize: 44, fontWeight: 300, color: '#fff', letterSpacing: '-0.02em' } }, metric.value),
+          createElement('span', { style: { fontSize: 16, color: 'rgba(238,243,238,0.65)' } }, metric.unit),
+        ),
+        createElement('div', { style: { fontSize: 12, color: 'rgba(238,243,238,0.55)', marginTop: 2 } }, metric.label),
+      ),
+      // Mode circles (light: brightness presets; climate: mode presets)
+      ...(modes.length > 0 ? [
+        createElement('div', { key: 'modes', style: { display: 'flex', justifyContent: 'center', gap: 26 } },
+          ...modes.map(mode =>
+            createElement('div', { key: mode.value, style: { display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6 } },
+              createElement('button', {
+                onClick: () => onAction(categoryOf(device) === 'light' ? 'bright' : 'mode', mode.value),
+                disabled: busy,
+                style: {
+                  width: 54, height: 54, borderRadius: '50%', border: 'none', fontFamily: 'inherit',
+                  fontSize: 20, fontWeight: 700, cursor: busy ? 'default' : 'pointer',
+                  background: activeMode(mode) ? 'linear-gradient(160deg, #3da5f5, #2b7fe0)' : 'rgba(255,255,255,0.10)',
+                  color: '#fff',
+                },
+              }, mode.icon),
+              createElement('span', { style: { fontSize: 12, color: activeMode(mode) ? '#8fc8ff' : 'rgba(238,243,238,0.72)' } }, mode.label),
+            ),
+          ),
+        ),
+      ] : []),
+      // More operations
+      createElement('button', {
+        onClick: () => setMore(m => !m),
+        style: {
+          width: '100%', padding: '10px 0', border: 'none', background: 'transparent',
+          borderTop: '1px solid rgba(255,255,255,0.08)',
+          color: 'rgba(238,243,238,0.65)', fontSize: 13, cursor: 'pointer', fontFamily: 'inherit',
+        },
+      }, '更多操作'),
+      ...(more ? [
+        createElement('div', {
+          key: 'raw',
+          style: {
+            background: 'rgba(0,0,0,0.30)', borderRadius: 12, padding: '10px 12px',
+            fontFamily: 'ui-monospace, Menlo, monospace', fontSize: 12,
+            color: 'rgba(238,243,238,0.70)', lineHeight: 1.7, wordBreak: 'break-all',
+            maxHeight: 140, overflowY: 'auto',
           },
         },
-          createElement('span', { style: { color: NEO.muted, fontSize: 11, fontWeight: 800, letterSpacing: '0.05em' } }, mode.toUpperCase()),
-          createElement('span', { style: { color: NEO.text, fontSize: 26, fontWeight: 800 } }, temp ? `${Math.round(temp)}°` : '--'),
-          createElement('span', { style: { color: NEO.muted, fontSize: 10 } }, '温度'),
-        ),
-      ),
+          Object.entries(device.props ?? {}).map(([k, v]) => `${k}: ${fmtValue(v)}`).join('\n') || '(无属性)'),
+      ] : []),
     ),
-    createElement('div', { style: { display: 'flex', gap: 10 } },
-      createElement('div', { style: { ...TILE_PRESET, padding: '8px 6px' } },
-        createElement('span', { style: { color: NEO.muted, fontSize: 10, fontWeight: 700 } }, '湿度'),
-        createElement('span', { style: { color: NEO.text, fontSize: 14, fontWeight: 800 } },
-          device.props.humidity != null ? `${fmtPropValue('humidity', device.props.humidity)}` : '--'),
-      ),
-      createElement('div', { style: { ...TILE_PRESET, padding: '8px 6px' } },
-        createElement('span', { style: { color: NEO.muted, fontSize: 10, fontWeight: 700 } }, '模式'),
-        createElement('span', { style: { color: NEO.text, fontSize: 14, fontWeight: 800 } }, mode || '--'),
-      ),
-    ),
-    ...(controllable ? [
-      createElement('button', {
-        key: 'sw', onClick: onToggle, disabled: busy,
-        style: {
-          alignSelf: 'flex-end', width: 44, height: 24, borderRadius: 99, padding: 2, border: 'none',
-          cursor: busy ? 'default' : 'pointer', fontFamily: 'inherit',
-          display: 'inline-flex', alignItems: 'center', justifyContent: on ? 'flex-end' : 'flex-start',
-          background: on ? NEO_GRADIENT : '#dde1ea',
-          boxShadow: on
-            ? 'inset 2px 2px 4px rgba(140, 55, 110, 0.35), inset -2px -2px 4px rgba(255, 255, 255, 0.30)'
-            : 'inset 2px 2px 4px rgba(163, 170, 190, 0.55), inset -2px -2px 4px rgba(255, 255, 255, 0.90)',
-        },
-      },
-        createElement('span', {
-          style: { width: 20, height: 20, borderRadius: '50%', background: on ? '#fff' : '#f4f6fa', boxShadow: '1px 1px 3px rgba(120, 127, 145, 0.40)' },
-        }, busy ? '' : null),
-      ),
-    ] : []),
   )
 }
 
-/** Sensor card — big metric tiles (temperature / humidity), read-only. */
-function SensorCard({ device }: { device: DashboardDevice }): ReactNode {
-  const temp = device.props.temperature
-  const humidity = device.props.humidity
-  const pairs: Array<[string, unknown]> = [
-    ['温度', temp],
-    ['湿度', humidity],
-  ].filter(([, v]) => v != null) as Array<[string, unknown]>
-  return createElement('div', {
-    className: 'mihome-card',
-    style: { background: NEO.card, borderRadius: 18, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 8 },
-  },
-    nameStatusRow(device),
-    createElement('div', { style: { display: 'flex', gap: 10 } },
-      ...pairs.map(([label, value]) =>
-        createElement('div', { key: label, style: { ...TILE_PRESET, padding: '10px 6px' } },
-          createElement('span', { style: { color: NEO.muted, fontSize: 10, fontWeight: 700 } }, label),
-          createElement('span', { style: { color: NEO.text, fontSize: 16, fontWeight: 800 } }, fmtPropValue(label === '温度' ? 'temperature' : 'humidity', value)),
-        ),
-      ),
-    ),
-    createElement('div', { style: { color: '#a9b0c0', fontSize: 11, fontFamily: 'ui-monospace, Menlo, monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, device.model),
-  )
-}
-
-/** Outlet / power meter card — consumption readout, read-only. */
-function PowerCard({ device }: { device: DashboardDevice }): ReactNode {
-  const watt = device.props.power_consumption
-  return createElement('div', {
-    className: 'mihome-card',
-    style: { background: NEO.card, borderRadius: 18, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 8 },
-  },
-    nameStatusRow(device),
-    createElement('div', { style: { display: 'flex', gap: 10 } },
-      createElement('div', { style: { ...TILE_PRESET, padding: '12px 6px' } },
-        createElement('span', { style: { fontSize: 18 } }, '⚡'),
-        createElement('span', { style: { color: NEO.muted, fontSize: 10, fontWeight: 700 } }, '功率'),
-        createElement('span', { style: { color: NEO.text, fontSize: 16, fontWeight: 800 } },
-          watt != null ? `${fmtPropValue('power_consumption', watt)}` : '--'),
-      ),
-    ),
-    createElement('div', { style: { color: '#a9b0c0', fontSize: 11, fontFamily: 'ui-monospace, Menlo, monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, device.model),
-  )
-}
-
-/** Lock card — security status (locked/unlocked + battery), read-only. */
-function LockCard({ device }: { device: DashboardDevice }): ReactNode {
-  const state = String(device.props.power ?? device.props.state ?? '—')
-  const locked = !/unlock|off|0|false|开/i.test(state)
-  return createElement('div', {
-    className: 'mihome-card',
-    style: { background: NEO.card, borderRadius: 18, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 8 },
-  },
-    nameStatusRow(device),
-    createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 12 } },
-      createElement('span', {
-        style: {
-          fontSize: 22, width: 44, height: 44, flex: 'none',
-          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-          borderRadius: 12, background: locked ? NEO_GRADIENT : '#e2e6ef',
-          boxShadow: locked ? neoShadow(4) : 'inset 3px 3px 6px rgba(163, 170, 190, 0.45), inset -3px -3px 6px rgba(255, 255, 255, 0.95)',
-        },
-      }, locked ? '🔒' : '🔓'),
-      createElement('div', { style: { flex: 1, display: 'flex', flexDirection: 'column', gap: 2 } },
-        createElement('span', { style: { color: NEO.text, fontSize: 14, fontWeight: 800 } }, locked ? '已上锁' : '未上锁'),
-        createElement('span', { style: { color: NEO.muted, fontSize: 11 } },
-          device.props.battery != null ? `电量 ${fmtPropValue('battery', device.props.battery)}` : '—'),
-      ),
-    ),
-    createElement('div', { style: { color: '#a9b0c0', fontSize: 11, fontFamily: 'ui-monospace, Menlo, monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, device.model),
-  )
-}
-
-/** Camera card — status tile, read-only. */
-function CameraCard({ device }: { device: DashboardDevice }): ReactNode {
-  return createElement('div', {
-    className: 'mihome-card',
-    style: { background: NEO.card, borderRadius: 18, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 8 },
-  },
-    nameStatusRow(device),
-    createElement('div', { style: { ...TILE_PRESET, padding: '12px 6px' } },
-      createElement('span', { style: { fontSize: 18 } }, device.online ? '📷' : '📷'),
-      createElement('span', { style: { color: NEO.muted, fontSize: 10, fontWeight: 700 } }, '状态'),
-      createElement('span', { style: { color: device.online ? NEO.on : NEO.danger, fontSize: 14, fontWeight: 800 } },
-        device.online ? '在线 · 预览已就绪' : '离线'),
-    ),
-    createElement('div', { style: { color: '#a9b0c0', fontSize: 11, fontFamily: 'ui-monospace, Menlo, monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, device.model),
-  )
-}
-
-/** Dispatch: device type → its card template. */
-function deviceCardFor(device: DashboardDevice, busy: boolean, onToggle: () => void): ReactNode {
-  switch (categoryOf(device)) {
-    case 'climate':
-      return createElement(ThermostatCard, { key: device.did, device, busy, onToggle })
-    case 'sensor':
-      return createElement(SensorCard, { key: device.did, device })
-    case 'meter':
-      return createElement(PowerCard, { key: device.did, device })
-    case 'lock':
-      return createElement(LockCard, { key: device.did, device })
-    case 'camera':
-      return createElement(CameraCard, { key: device.did, device })
-    default:
-      return createElement(DeviceCard, { key: device.did, device, busy, onToggle })
-  }
+/** Dispatch: uniform tile card every device (type detail lives in the panel). */
+function deviceCardFor(device: DashboardDevice, busy: boolean, onToggle: () => void, onOpen: () => void, roomName: string | undefined): ReactNode {
+  return createElement(TileCard, { key: device.did, device, busy, onToggle, onOpen, roomName, stateText: deviceStateText(device) })
 }
 
 // ---------------------------------------------------------------------------
@@ -539,6 +505,7 @@ function MihomeView(): ReactNode {
   const [roomFilter, setRoomFilter] = useState<number | 'all'>('all')
   const [busyDid, setBusyDid] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  const [sheetDid, setSheetDid] = useState<string | null>(null)
   const state = useConsoleState(tick)
   const snapshot = state?.snapshot ?? null
   const onlineCount = snapshot ? snapshot.devices.filter(d => d.online).length : 0
@@ -550,16 +517,15 @@ function MihomeView(): ReactNode {
     : (snapshot?.devices ?? [])
   const groups = snapshot ? groupDevices(visibleDevices) : []
 
-  const toggleDevice = async (device: DashboardDevice): Promise<void> => {
-    const power = device.props.power
-    const isOn = power === 1 || power === '1' || power === 'on' || power === true
+  const roomNameFor = (device: DashboardDevice): string | undefined =>
+    snapshot?.rooms.find(r => r.room_id === device.room_id)?.name
+  const sheetDevice = snapshot?.devices.find(d => d.did === sheetDid) ?? null
+
+  const control = async (device: DashboardDevice, query: string): Promise<void> => {
     setBusyDid(device.did)
     setNotice(null)
     try {
-      const res = await fetch(
-        `/dsh-mihome/control?deviceId=${encodeURIComponent(device.did)}&on=${isOn ? '0' : '1'}`,
-        { method: 'POST' },
-      )
+      const res = await fetch(`/dsh-mihome/control?deviceId=${encodeURIComponent(device.did)}${query}`, { method: 'POST' })
       const body = (await res.json().catch(() => null)) as { ok?: boolean; error?: string } | null
       if (body?.ok) {
         setTick(t => t + 1)
@@ -570,6 +536,19 @@ function MihomeView(): ReactNode {
       setNotice('无法连接控制接口（/dsh-mihome/control）')
     }
     setBusyDid(null)
+  }
+
+  const toggleDevice = async (device: DashboardDevice): Promise<void> => {
+    const isOn = powerOn(device)
+    await control(device, `&action=power&on=${isOn ? '0' : '1'}`)
+  }
+
+  const sheetAction = async (device: DashboardDevice, action: string, value?: string): Promise<void> => {
+    if (action === 'power') {
+      await control(device, `&action=power&on=${value === '0' ? '0' : '1'}`)
+    } else {
+      await control(device, `&action=${action}&value=${encodeURIComponent(value ?? '')}`)
+    }
   }
 
   const pill = snapshot
@@ -585,7 +564,7 @@ function MihomeView(): ReactNode {
   return createElement('div', {
     style: {
       height: '100%', overflowY: 'auto',
-      background: NEO.bg,
+      background: 'linear-gradient(165deg, #cdd8c3 0%, #b7c9ab 100%)',
       fontFamily: 'system-ui, -apple-system, "PingFang SC", sans-serif',
     },
   },
@@ -724,6 +703,8 @@ function MihomeView(): ReactNode {
                 device,
                 busyDid === device.did,
                 () => { void toggleDevice(device) },
+                () => setSheetDid(device.did),
+                roomNameFor(device),
               )),
             ),
           ),
@@ -746,6 +727,16 @@ function MihomeView(): ReactNode {
             ),
           ),
         ] : []),
+      ] : []),
+      ...(sheetDevice ? [
+        createElement(DeviceSheet, {
+          key: sheetDevice.did,
+          device: sheetDevice,
+          roomName: roomNameFor(sheetDevice),
+          busy: busyDid === sheetDevice.did,
+          onClose: () => setSheetDid(null),
+          onAction: (action, value) => { void sheetAction(sheetDevice, action, value) },
+        }),
       ] : []),
     ),
   )
