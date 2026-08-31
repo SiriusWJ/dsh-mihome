@@ -96,29 +96,42 @@ export async function buildDashboardSnapshot(
   const home = homes[0]
   const rooms: DashboardRoom[] = home?.rooms ?? []
 
-  // Device → room mapping across all homes (roomlist.dids).
+  // Device → room mapping across all homes (roomlist.dids), with a
+  // sub-device fallback: `1005347915.s2` falls back to `1005347915`.
   const roomByDid = new Map<string, number>()
   for (const h of homes) {
     for (const room of h.rooms) {
       for (const did of room.dids ?? []) roomByDid.set(did, room.room_id)
     }
   }
+  const roomOf = (did: string): number | undefined => {
+    const hit = roomByDid.get(did)
+    if (hit !== undefined) return hit
+    return roomByDid.get(did.split('.')[0] ?? '')
+  }
 
-  // Fetch props for up to `dashboardPropsLimit` devices, individually;
-  // failures degrade to an empty props map (device offline, wrong model…).
+  // Props are fetched only for the dashboard-limited online subset; the
+  // device LIST itself is always complete.
   const limit = Math.min(Math.max(config.dashboardPropsLimit, 1), 100)
-  const targets = devices.slice(0, limit)
-  const propsList = await Promise.allSettled(targets.map(d =>
+  const propsTargets = devices
+    .filter(d => d.online)
+    .slice(0, limit)
+  const propsList = await Promise.allSettled(propsTargets.map(d =>
     client.getProps(d.did, propsForCategory(categoryOf(d.model))),
   ))
-  const snapshotDevices: DashboardDevice[] = targets.map((d, i) => ({
+  const propsByDid = new Map<string, Record<string, unknown>>()
+  propsTargets.forEach((d, i) => {
+    if (propsList[i]?.status === 'fulfilled') propsByDid.set(d.did, propsList[i].value)
+  })
+
+  const snapshotDevices: DashboardDevice[] = devices.map(d => ({
     did: d.did,
     name: d.name,
     model: d.model,
     online: d.online,
     category: categoryOf(d.model),
-    props: (propsList[i]?.status === 'fulfilled' ? propsList[i].value : {}) as Record<string, unknown>,
-    ...(roomByDid.has(d.did) ? { room_id: roomByDid.get(d.did) } : {}),
+    props: propsByDid.get(d.did) ?? {},
+    ...(roomOf(d.did) !== undefined ? { room_id: roomOf(d.did) } : {}),
   }))
 
   return {

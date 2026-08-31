@@ -99,6 +99,11 @@ export class MiHomeService {
         for (const did of room.dids ?? []) roomByDid.set(did, room.room_id)
       }
     }
+    const roomOf = (did: string): number | undefined => {
+      const hit = roomByDid.get(did)
+      if (hit !== undefined) return hit
+      return roomByDid.get(did.split('.')[0] ?? '')
+    }
     const devices: DashboardDevice[] = this.devices.map(d => ({
       did: d.did,
       name: d.name,
@@ -106,7 +111,7 @@ export class MiHomeService {
       online: d.online,
       category: categoryOf(d.model),
       props: this.props.get(d.did) ?? {},
-      ...(roomByDid.has(d.did) ? { room_id: roomByDid.get(d.did) } : {}),
+      ...(roomOf(d.did) !== undefined ? { room_id: roomOf(d.did) } : {}),
     }))
     const rooms: DashboardRoom[] = this.homes[0]?.rooms ?? []
     return {
