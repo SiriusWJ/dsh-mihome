@@ -596,6 +596,7 @@ export class MiCloudClient implements MiClient {
     temperature: [{ siid: 3, piid: 1 }],
     humidity: [{ siid: 3, piid: 2 }],
     battery: [{ siid: 4, piid: 1 }, { siid: 3, piid: 3 }],
+    mode: [{ siid: 2, piid: 4 }],
   }
 }
 

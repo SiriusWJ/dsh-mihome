@@ -171,6 +171,8 @@ interface ConsoleState {
   health: { account?: string; region?: string; mode?: string; homes?: number; devices?: number } | null
   error?: string
   at: number
+  /** Rendered from the last cached snapshot (shown instantly, refreshed in background). */
+  fromCache?: boolean
 }
 
 interface ConsoleBody {
@@ -180,8 +182,41 @@ interface ConsoleBody {
   error?: string
 }
 
+const CONSOLE_CACHE_KEY = 'dsh-mihome:console:snapshot:v1'
+
+function readCachedConsole(): ConsoleState | null {
+  try {
+    const raw = localStorage.getItem(CONSOLE_CACHE_KEY)
+    if (!raw) return null
+    const data = JSON.parse(raw) as { snapshot?: DashboardSnapshot; health?: ConsoleState['health']; at?: number }
+    const snapshot = data.snapshot
+    if (!snapshot || snapshot.kind !== 'mihome-dashboard' || !Array.isArray(snapshot.devices)) return null
+    return {
+      ok: true,
+      snapshot,
+      health: data.health ?? null,
+      at: data.at ?? Date.now(),
+      fromCache: true,
+    }
+  } catch {
+    return null
+  }
+}
+
+function saveConsoleCache(state: ConsoleState): void {
+  try {
+    localStorage.setItem(CONSOLE_CACHE_KEY, JSON.stringify({
+      snapshot: state.snapshot,
+      health: state.health,
+      at: state.at,
+    }))
+  } catch {
+    // quota / private mode — the console still works, just without warm start
+  }
+}
+
 function useConsoleState(tick: number): ConsoleState | null {
-  const [state, setState] = useState<ConsoleState | null>(null)
+  const [state, setState] = useState<ConsoleState | null>(() => readCachedConsole())
   useEffect(() => {
     let cancelled = false
     const load = async () => {
@@ -189,16 +224,25 @@ function useConsoleState(tick: number): ConsoleState | null {
         const res = await fetch('/dsh-mihome/state')
         const body = (await res.json()) as ConsoleBody
         if (cancelled) return
-        setState({
-          ok: body.ok === true,
-          snapshot: body.snapshot ?? null,
-          health: body.health ?? null,
-          error: body.error,
-          at: Date.now(),
-        })
+        if (body.ok && body.snapshot) {
+          const fresh: ConsoleState = {
+            ok: true,
+            snapshot: body.snapshot,
+            health: body.health ?? null,
+            at: Date.now(),
+          }
+          setState(fresh)
+          saveConsoleCache(fresh)
+        } else {
+          setState(prev => prev?.fromCache
+            ? { ...prev, at: Date.now() }
+            : { ok: false, snapshot: null, health: null, error: body.error, at: Date.now() })
+        }
       } catch (err) {
         if (!cancelled) {
-          setState({ ok: false, snapshot: null, health: null, error: String(err), at: Date.now() })
+          setState(prev => prev?.fromCache
+            ? { ...prev, at: Date.now() }
+            : { ok: false, snapshot: null, health: null, error: String(err), at: Date.now() })
         }
       }
     }
@@ -286,6 +330,207 @@ function DeviceCard({ device, busy, onToggle }: { device: DashboardDevice; busy?
 }
 
 // ---------------------------------------------------------------------------
+// Card templates — one design per device type (research-backed: thermostat
+// gets a dial, sensors get big-metric tiles, lock/camera get status cards,
+// switches get the pill toggle).
+// ---------------------------------------------------------------------------
+
+function powerOn(device: DashboardDevice): boolean {
+  const power = device.props.power
+  return power === 1 || power === '1' || power === 'on' || power === true || power === true
+}
+
+function nameStatusRow(device: DashboardDevice): ReactNode {
+  return createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
+    createElement('span', { style: { fontSize: 14, flex: 1, color: NEO.text, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
+      device.name || device.did),
+    createElement('span', { style: { color: device.online ? NEO.muted : NEO.danger, fontSize: 11, fontWeight: 700 } },
+      device.online ? '在线' : '离线'))
+}
+
+/** Inner tile: pressed-in neumorphic well for metrics. */
+const TILE_PRESET = {
+  background: '#e2e6ef',
+  borderRadius: 14,
+  boxShadow: 'inset 3px 3px 6px rgba(163, 170, 190, 0.45), inset -3px -3px 6px rgba(255, 255, 255, 0.95)',
+  display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2,
+  flex: 1, minWidth: 0,
+} as const
+
+/** Climate card — ring dial with mode/temperature (reference screen 2/3). */
+function ThermostatCard({ device, busy, onToggle }: { device: DashboardDevice; busy?: boolean; onToggle?: () => void }): ReactNode {
+  const on = powerOn(device)
+  const temp = Number(device.props.temperature ?? device.props.target_temperature ?? 0) || 0
+  const mode = String(device.props.mode ?? (on ? 'heating' : 'off'))
+  const pct = Math.max(0, Math.min(100, ((temp - 5) / 30) * 100))
+  const controllable = device.online
+  return createElement('div', {
+    className: 'mihome-card',
+    style: { background: NEO.card, borderRadius: 18, padding: '14px', display: 'flex', flexDirection: 'column', gap: 10 },
+  },
+    nameStatusRow(device),
+    createElement('div', { style: { display: 'flex', justifyContent: 'center' } },
+      createElement('div', {
+        style: {
+          width: 108, height: 108, borderRadius: '50%', position: 'relative',
+          background: `conic-gradient(from 210deg, #ff7ab8 0% ${pct}%, #e2e6ef ${pct}% 100%)`,
+          boxShadow: neoShadow(6),
+        },
+      },
+        createElement('div', {
+          style: {
+            position: 'absolute', inset: 14, borderRadius: '50%', background: NEO.card,
+            display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+            boxShadow: 'inset 3px 3px 7px rgba(163, 170, 190, 0.45), inset -3px -3px 7px rgba(255, 255, 255, 0.95)',
+          },
+        },
+          createElement('span', { style: { color: NEO.muted, fontSize: 11, fontWeight: 800, letterSpacing: '0.05em' } }, mode.toUpperCase()),
+          createElement('span', { style: { color: NEO.text, fontSize: 26, fontWeight: 800 } }, temp ? `${Math.round(temp)}°` : '--'),
+          createElement('span', { style: { color: NEO.muted, fontSize: 10 } }, '温度'),
+        ),
+      ),
+    ),
+    createElement('div', { style: { display: 'flex', gap: 10 } },
+      createElement('div', { style: { ...TILE_PRESET, padding: '8px 6px' } },
+        createElement('span', { style: { color: NEO.muted, fontSize: 10, fontWeight: 700 } }, '湿度'),
+        createElement('span', { style: { color: NEO.text, fontSize: 14, fontWeight: 800 } },
+          device.props.humidity != null ? `${fmtPropValue('humidity', device.props.humidity)}` : '--'),
+      ),
+      createElement('div', { style: { ...TILE_PRESET, padding: '8px 6px' } },
+        createElement('span', { style: { color: NEO.muted, fontSize: 10, fontWeight: 700 } }, '模式'),
+        createElement('span', { style: { color: NEO.text, fontSize: 14, fontWeight: 800 } }, mode || '--'),
+      ),
+    ),
+    ...(controllable ? [
+      createElement('button', {
+        key: 'sw', onClick: onToggle, disabled: busy,
+        style: {
+          alignSelf: 'flex-end', width: 44, height: 24, borderRadius: 99, padding: 2, border: 'none',
+          cursor: busy ? 'default' : 'pointer', fontFamily: 'inherit',
+          display: 'inline-flex', alignItems: 'center', justifyContent: on ? 'flex-end' : 'flex-start',
+          background: on ? NEO_GRADIENT : '#dde1ea',
+          boxShadow: on
+            ? 'inset 2px 2px 4px rgba(140, 55, 110, 0.35), inset -2px -2px 4px rgba(255, 255, 255, 0.30)'
+            : 'inset 2px 2px 4px rgba(163, 170, 190, 0.55), inset -2px -2px 4px rgba(255, 255, 255, 0.90)',
+        },
+      },
+        createElement('span', {
+          style: { width: 20, height: 20, borderRadius: '50%', background: on ? '#fff' : '#f4f6fa', boxShadow: '1px 1px 3px rgba(120, 127, 145, 0.40)' },
+        }, busy ? '' : null),
+      ),
+    ] : []),
+  )
+}
+
+/** Sensor card — big metric tiles (temperature / humidity), read-only. */
+function SensorCard({ device }: { device: DashboardDevice }): ReactNode {
+  const temp = device.props.temperature
+  const humidity = device.props.humidity
+  const pairs: Array<[string, unknown]> = [
+    ['温度', temp],
+    ['湿度', humidity],
+  ].filter(([, v]) => v != null) as Array<[string, unknown]>
+  return createElement('div', {
+    className: 'mihome-card',
+    style: { background: NEO.card, borderRadius: 18, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 8 },
+  },
+    nameStatusRow(device),
+    createElement('div', { style: { display: 'flex', gap: 10 } },
+      ...pairs.map(([label, value]) =>
+        createElement('div', { key: label, style: { ...TILE_PRESET, padding: '10px 6px' } },
+          createElement('span', { style: { color: NEO.muted, fontSize: 10, fontWeight: 700 } }, label),
+          createElement('span', { style: { color: NEO.text, fontSize: 16, fontWeight: 800 } }, fmtPropValue(label === '温度' ? 'temperature' : 'humidity', value)),
+        ),
+      ),
+    ),
+    createElement('div', { style: { color: '#a9b0c0', fontSize: 11, fontFamily: 'ui-monospace, Menlo, monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, device.model),
+  )
+}
+
+/** Outlet / power meter card — consumption readout, read-only. */
+function PowerCard({ device }: { device: DashboardDevice }): ReactNode {
+  const watt = device.props.power_consumption
+  return createElement('div', {
+    className: 'mihome-card',
+    style: { background: NEO.card, borderRadius: 18, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 8 },
+  },
+    nameStatusRow(device),
+    createElement('div', { style: { display: 'flex', gap: 10 } },
+      createElement('div', { style: { ...TILE_PRESET, padding: '12px 6px' } },
+        createElement('span', { style: { fontSize: 18 } }, '⚡'),
+        createElement('span', { style: { color: NEO.muted, fontSize: 10, fontWeight: 700 } }, '功率'),
+        createElement('span', { style: { color: NEO.text, fontSize: 16, fontWeight: 800 } },
+          watt != null ? `${fmtPropValue('power_consumption', watt)}` : '--'),
+      ),
+    ),
+    createElement('div', { style: { color: '#a9b0c0', fontSize: 11, fontFamily: 'ui-monospace, Menlo, monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, device.model),
+  )
+}
+
+/** Lock card — security status (locked/unlocked + battery), read-only. */
+function LockCard({ device }: { device: DashboardDevice }): ReactNode {
+  const state = String(device.props.power ?? device.props.state ?? '—')
+  const locked = !/unlock|off|0|false|开/i.test(state)
+  return createElement('div', {
+    className: 'mihome-card',
+    style: { background: NEO.card, borderRadius: 18, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 8 },
+  },
+    nameStatusRow(device),
+    createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 12 } },
+      createElement('span', {
+        style: {
+          fontSize: 22, width: 44, height: 44, flex: 'none',
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          borderRadius: 12, background: locked ? NEO_GRADIENT : '#e2e6ef',
+          boxShadow: locked ? neoShadow(4) : 'inset 3px 3px 6px rgba(163, 170, 190, 0.45), inset -3px -3px 6px rgba(255, 255, 255, 0.95)',
+        },
+      }, locked ? '🔒' : '🔓'),
+      createElement('div', { style: { flex: 1, display: 'flex', flexDirection: 'column', gap: 2 } },
+        createElement('span', { style: { color: NEO.text, fontSize: 14, fontWeight: 800 } }, locked ? '已上锁' : '未上锁'),
+        createElement('span', { style: { color: NEO.muted, fontSize: 11 } },
+          device.props.battery != null ? `电量 ${fmtPropValue('battery', device.props.battery)}` : '—'),
+      ),
+    ),
+    createElement('div', { style: { color: '#a9b0c0', fontSize: 11, fontFamily: 'ui-monospace, Menlo, monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, device.model),
+  )
+}
+
+/** Camera card — status tile, read-only. */
+function CameraCard({ device }: { device: DashboardDevice }): ReactNode {
+  return createElement('div', {
+    className: 'mihome-card',
+    style: { background: NEO.card, borderRadius: 18, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 8 },
+  },
+    nameStatusRow(device),
+    createElement('div', { style: { ...TILE_PRESET, padding: '12px 6px' } },
+      createElement('span', { style: { fontSize: 18 } }, device.online ? '📷' : '📷'),
+      createElement('span', { style: { color: NEO.muted, fontSize: 10, fontWeight: 700 } }, '状态'),
+      createElement('span', { style: { color: device.online ? NEO.on : NEO.danger, fontSize: 14, fontWeight: 800 } },
+        device.online ? '在线 · 预览已就绪' : '离线'),
+    ),
+    createElement('div', { style: { color: '#a9b0c0', fontSize: 11, fontFamily: 'ui-monospace, Menlo, monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, device.model),
+  )
+}
+
+/** Dispatch: device type → its card template. */
+function deviceCardFor(device: DashboardDevice, busy: boolean, onToggle: () => void): ReactNode {
+  switch (categoryOf(device)) {
+    case 'climate':
+      return createElement(ThermostatCard, { key: device.did, device, busy, onToggle })
+    case 'sensor':
+      return createElement(SensorCard, { key: device.did, device })
+    case 'meter':
+      return createElement(PowerCard, { key: device.did, device })
+    case 'lock':
+      return createElement(LockCard, { key: device.did, device })
+    case 'camera':
+      return createElement(CameraCard, { key: device.did, device })
+    default:
+      return createElement(DeviceCard, { key: device.did, device, busy, onToggle })
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Mi Home view (replaces the chat area while active; lives in the top view
 // ring as a "🏠 米家" tab, so sidebar and header stay untouched)
 // ---------------------------------------------------------------------------
@@ -357,9 +602,11 @@ function MihomeView(): ReactNode {
         }, pill.text),
         createElement('span', { style: { color: NEO.muted, fontSize: 12, flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
           state && !notConnected
-            ? (state.health
-                ? `${state.health.account ?? '...'} · 区域 ${state.health.region ?? 'cn'} · ${state.health.homes ?? 0} 家庭 / ${state.health.devices ?? 0} 设备 · ${shortTime(new Date(state.at).toISOString())}`
-                : '')
+            ? (state.fromCache
+                ? `缓存数据 · 更新于 ${shortTime(new Date(state.at).toISOString())} · 正在刷新…`
+                : (state.health
+                    ? `${state.health.account ?? '...'} · 区域 ${state.health.region ?? 'cn'} · ${state.health.homes ?? 0} 家庭 / ${state.health.devices ?? 0} 设备 · ${shortTime(new Date(state.at).toISOString())}`
+                    : ''))
             : ''),
         createElement('button', {
           onClick: () => setTick(t => t + 1),
@@ -473,12 +720,11 @@ function MihomeView(): ReactNode {
           createElement('div', { key: group.title, style: { marginBottom: 18 } },
             createElement('div', { style: { color: '#71788a', fontSize: 12, marginBottom: 10, fontWeight: 800, letterSpacing: '0.04em' } }, group.title),
             createElement('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))', gap: 12 } },
-              ...group.items.map(device => createElement(DeviceCard, {
-                key: device.did,
+              ...group.items.map(device => deviceCardFor(
                 device,
-                busy: busyDid === device.did,
-                onToggle: () => { void toggleDevice(device) },
-              })),
+                busyDid === device.did,
+                () => { void toggleDevice(device) },
+              )),
             ),
           ),
         ),
