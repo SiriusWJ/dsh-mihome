@@ -96,6 +96,14 @@ export async function buildDashboardSnapshot(
   const home = homes[0]
   const rooms: DashboardRoom[] = home?.rooms ?? []
 
+  // Device → room mapping across all homes (roomlist.dids).
+  const roomByDid = new Map<string, number>()
+  for (const h of homes) {
+    for (const room of h.rooms) {
+      for (const did of room.dids ?? []) roomByDid.set(did, room.room_id)
+    }
+  }
+
   // Fetch props for up to `dashboardPropsLimit` devices, individually;
   // failures degrade to an empty props map (device offline, wrong model…).
   const limit = Math.min(Math.max(config.dashboardPropsLimit, 1), 100)
@@ -110,6 +118,7 @@ export async function buildDashboardSnapshot(
     online: d.online,
     category: categoryOf(d.model),
     props: (propsList[i]?.status === 'fulfilled' ? propsList[i].value : {}) as Record<string, unknown>,
+    ...(roomByDid.has(d.did) ? { room_id: roomByDid.get(d.did) } : {}),
   }))
 
   return {

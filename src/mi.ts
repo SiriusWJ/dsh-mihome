@@ -189,7 +189,7 @@ export interface HomeInfo {
   home_id: number
   name: string
   owner_id: number
-  rooms: Array<{ room_id: number; name: string }>
+  rooms: Array<{ room_id: number; name: string; dids?: string[] }>
 }
 
 export interface DeviceInfo {
@@ -501,10 +501,14 @@ export class MiCloudClient implements MiClient {
         home_id: Number(h.id ?? h.home_id ?? 0),
         name: String(h.name ?? h.label ?? '未命名家庭'),
         owner_id: Number(h.uid ?? h.owner_id ?? 0),
-        rooms: roomsRaw.map(r => ({
-          room_id: Number((r as Record<string, unknown>).id ?? (r as Record<string, unknown>).room_id ?? 0),
-          name: String((r as Record<string, unknown>).name ?? (r as Record<string, unknown>).label ?? ''),
-        })),
+        rooms: roomsRaw.map(r => {
+          const room = r as Record<string, unknown>
+          return {
+            room_id: Number(room.id ?? room.room_id ?? 0),
+            name: String(room.name ?? room.label ?? ''),
+            ...(Array.isArray(room.dids) ? { dids: room.dids.map(d => String(d)) } : {}),
+          }
+        }),
       }
     })
   }

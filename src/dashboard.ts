@@ -16,6 +16,8 @@ export type DashboardDevice = {
   online: boolean
   category: string
   props: Record<string, unknown>
+  /** Room id when the home maps this device (roomlist.dids); undefined = unfiltered bucket. */
+  room_id?: number
 }
 
 /** One room chip in the dashboard snapshot. */

@@ -109,6 +109,53 @@ export function apply(ctx: Context, config: Config) {
         }
       },
     }), 'dsh-mihome.web')
+    // Console control: the user clicks a device card toggle — a human
+    // gesture, so the agent approval gate does not apply; the category
+    // allowlist, same-origin check and online check still hold.
+    host.effect(() => host.webServer.register({
+      kind: 'exact',
+      path: '/dsh-mihome/control',
+      handler: async (req, res) => {
+        if (!sameOrigin(req)) {
+          sendJson(res, 403, { ok: false, error: 'cross-origin request rejected' })
+          return
+        }
+        const url = new URL((req as { url?: string }).url ?? '/', 'http://127.0.0.1')
+        const deviceId = url.searchParams.get('deviceId') ?? ''
+        const on = ['1', 'true', 'on'].includes(url.searchParams.get('on') ?? '')
+        if (!deviceId) {
+          sendJson(res, 200, { ok: false, error: '缺少 deviceId' })
+          return
+        }
+        try {
+          const { devices } = await cachedDevices(client)
+          const device = devices.find(d => d.did === deviceId)
+          if (!device) {
+            sendJson(res, 200, { ok: false, error: `未找到设备 ${deviceId}` })
+            return
+          }
+          const category = categoryOf(device.model)
+          if (config.allowedCategories.length > 0 && !config.allowedCategories.includes(category)) {
+            sendJson(res, 200, { ok: false, error: `类别 ${category} 不在 allowedCategories（${config.allowedCategories.join(', ')}）内` })
+            return
+          }
+          if (!device.online) {
+            sendJson(res, 200, { ok: false, error: '设备离线，无法控制' })
+            return
+          }
+          await client.rawCommand(device.did, 'set_power', [on ? 'on' : 'off'])
+          changes.push({
+            did: device.did,
+            name: device.name,
+            changes: [['power', null, on ? 'on' : 'off']],
+            time: new Date().toISOString(),
+          })
+          sendJson(res, 200, { ok: true, deviceId: device.did, name: device.name, on })
+        } catch (err) {
+          sendJson(res, 200, { ok: false, error: err instanceof Error ? err.message : String(err) })
+        }
+      },
+    }), 'dsh-mihome.control')
     // Auth routes (settings page QR login). All auth routes are same-origin
     // guarded.
     host.effect(() => host.webServer.register({

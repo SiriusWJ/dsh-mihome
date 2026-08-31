@@ -188,7 +188,11 @@ function useConsoleState(tick: number): ConsoleState | null {
 // ---------------------------------------------------------------------------
 // Device cards
 // ---------------------------------------------------------------------------
-function DeviceCard({ device }: { device: DashboardDevice }): ReactNode {
+
+/** Categories the console may switch (power on/off). */
+const CONTROLLABLE: string[] = ['light', 'outlet', 'climate', 'media', 'fan', 'cleaning']
+
+function DeviceCard({ device, busy, onToggle }: { device: DashboardDevice; busy?: boolean; onToggle?: () => void }): ReactNode {
   const dot = stateDot(device)
   const props = Object.entries(device.props ?? {})
     .filter(([key]) => key !== 'power')
@@ -196,6 +200,7 @@ function DeviceCard({ device }: { device: DashboardDevice }): ReactNode {
     .map(([key, value]) => `${key}: ${fmtPropValue(key, value)}`)
   const power = device.props.power
   const on = power === 1 || power === '1' || power === 'on' || power === true
+  const controllable = device.online && CONTROLLABLE.includes(categoryOf(device))
   return createElement('div', {
     className: 'mihome-card',
     style: {
@@ -225,6 +230,18 @@ function DeviceCard({ device }: { device: DashboardDevice }): ReactNode {
           background: device.online ? (on ? 'rgba(110, 231, 183, 0.10)' : 'rgba(139, 147, 161, 0.10)') : 'rgba(248, 113, 113, 0.10)',
         },
       }, device.online ? (on ? 'on' : 'off') : '离线'),
+      ...(controllable ? [
+        createElement('button', {
+          key: 'toggle', onClick: onToggle, disabled: busy,
+          style: {
+            height: 24, padding: '0 8px', borderRadius: 6, flex: 'none',
+            fontSize: 11, fontWeight: 600, cursor: busy ? 'default' : 'pointer',
+            fontFamily: 'inherit', border: 'none',
+            color: on ? COLORS.danger : COLORS.on,
+            background: on ? 'rgba(248, 113, 113, 0.12)' : 'rgba(110, 231, 183, 0.12)',
+          },
+        }, busy ? '…' : (on ? '⏻ 关' : '⏻ 开')),
+      ] : []),
     ),
     createElement('div', {
       style: { color: COLORS.muted, fontSize: 12, lineHeight: 1.5, minHeight: 18 },
@@ -241,12 +258,41 @@ function DeviceCard({ device }: { device: DashboardDevice }): ReactNode {
 // ---------------------------------------------------------------------------
 function MihomeView(): ReactNode {
   const [tick, setTick] = useState(0)
+  const [roomFilter, setRoomFilter] = useState<number | 'all'>('all')
+  const [busyDid, setBusyDid] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
   const state = useConsoleState(tick)
   const snapshot = state?.snapshot ?? null
-  const groups = snapshot ? groupDevices(snapshot.devices) : []
   const onlineCount = snapshot ? snapshot.devices.filter(d => d.online).length : 0
   const notConnected = state !== null && !state.ok
   const loading = state === null
+
+  const visibleDevices = snapshot && roomFilter !== 'all'
+    ? snapshot.devices.filter(d => (d.room_id ?? -1) === roomFilter)
+    : (snapshot?.devices ?? [])
+  const groups = snapshot ? groupDevices(visibleDevices) : []
+
+  const toggleDevice = async (device: DashboardDevice): Promise<void> => {
+    const power = device.props.power
+    const isOn = power === 1 || power === '1' || power === 'on' || power === true
+    setBusyDid(device.did)
+    setNotice(null)
+    try {
+      const res = await fetch(
+        `/dsh-mihome/control?deviceId=${encodeURIComponent(device.did)}&on=${isOn ? '0' : '1'}`,
+        { method: 'POST' },
+      )
+      const body = (await res.json().catch(() => null)) as { ok?: boolean; error?: string } | null
+      if (body?.ok) {
+        setTick(t => t + 1)
+      } else {
+        setNotice(body?.error ?? '控制失败，请重试')
+      }
+    } catch {
+      setNotice('无法连接控制接口（/dsh-mihome/control）')
+    }
+    setBusyDid(null)
+  }
 
   const pill = snapshot
     ? {
@@ -350,32 +396,50 @@ function MihomeView(): ReactNode {
       ] : []),
       // Connected content
       ...(!loading && !notConnected && snapshot ? [
-        // Rooms
+        // Room filter chips
         ...(snapshot.rooms.length > 0 ? [
           createElement('div', {
-            key: 'rooms', style: { display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 16 },
+            key: 'rooms', style: { display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 12 },
           },
-            ...snapshot.rooms.map(room =>
-              createElement('span', {
-                key: room.room_id,
-                style: {
-                  fontSize: 12, color: COLORS.text, background: COLORS.card,
-                  border: `1px solid ${COLORS.border}`, borderRadius: 99, padding: '4px 12px',
-                },
-              }, `🏠 ${room.name}`)),
+            createElement('button', {
+              key: 'all', onClick: () => setRoomFilter('all'),
+              style: roomChipStyle(roomFilter === 'all'),
+            }, `🏠 全部 ${snapshot.devices.length}`),
+            ...snapshot.rooms.map(room => {
+              const count = snapshot.devices.filter(d => d.room_id === room.room_id).length
+              return createElement('button', {
+                key: room.room_id, onClick: () => setRoomFilter(room.room_id),
+                style: roomChipStyle(roomFilter === room.room_id),
+              }, `🏠 ${room.name} ${count}`)
+            }),
           ),
+        ] : []),
+        // Operation notice
+        ...(notice ? [
+          createElement('div', {
+            key: 'notice',
+            style: {
+              background: 'rgba(251, 191, 36, 0.08)', border: '1px solid rgba(251, 191, 36, 0.4)',
+              borderRadius: 10, padding: '8px 14px', color: COLORS.warn, fontSize: 13, marginBottom: 12,
+            },
+          }, `⚠️ ${notice}`),
         ] : []),
         // Summary line
         createElement('div', {
           key: 'summary',
           style: { color: COLORS.muted, fontSize: 12, marginBottom: 14 },
-        }, `${snapshot.devices.length} 台设备（${onlineCount} 在线）· 每 3 秒自动刷新 · 控制请回聊天用 mi_turn / mi_control（需人工审批）`),
+        }, `${visibleDevices.length} 台设备（${visibleDevices.filter(d => d.online).length} 在线）· 每 3 秒自动刷新 · 卡片「⏻ 开/关」即点即控（人工操作，类别白名单生效）`),
         // Device groups
         ...groups.map(group =>
           createElement('div', { key: group.title, style: { marginBottom: 18 } },
             createElement('div', { style: { color: COLORS.muted, fontSize: 12, marginBottom: 8, fontWeight: 600 } }, group.title),
             createElement('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))', gap: 8 } },
-              ...group.items.map(device => createElement(DeviceCard, { key: device.did, device })),
+              ...group.items.map(device => createElement(DeviceCard, {
+                key: device.did,
+                device,
+                busy: busyDid === device.did,
+                onToggle: () => { void toggleDevice(device) },
+              })),
             ),
           ),
         ),
@@ -400,6 +464,17 @@ function MihomeView(): ReactNode {
       ] : []),
     ),
   )
+}
+
+/** Active/inactive chip style for the room filter. */
+function roomChipStyle(active: boolean): React.CSSProperties {
+  return {
+    fontSize: 12, cursor: 'pointer', fontFamily: 'inherit',
+    color: active ? '#0e1013' : COLORS.text,
+    background: active ? COLORS.accent : COLORS.card,
+    border: `1px solid ${active ? COLORS.accent : COLORS.border}`,
+    borderRadius: 99, padding: '4px 12px',
+  }
 }
 
 // ---------------------------------------------------------------------------
