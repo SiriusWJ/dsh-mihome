@@ -35,30 +35,35 @@ const COLORS = {
 }
 
 // ---------------------------------------------------------------------------
-// Light neumorphic palette for the Mi Home console (soft dual shadows and a
-// pink-violet accent, matching the reference soft-UI style). The in-chat
-// dashboard card and settings stay on the dark DSH surface (COLORS above).
+// Neumorphic palette driven by the app theme tokens: every color resolves
+// through the `--dsw-alias-*` variables, so the console follows the DSH
+// light/dark theme automatically. Shadows are soft dual "neumorphic" ones
+// computed with color-mix from the theme text color.
 // ---------------------------------------------------------------------------
 const NEO = {
-  bg: '#e9ecf3',
-  card: '#eef1f6',
-  text: '#3d4356',
-  muted: '#8f96a8',
-  on: '#21c48b',
-  off: '#b8bfce',
-  danger: '#ec5f7b',
-  accent: '#e8559b',
-  accent2: '#8f6bff',
-  warn: '#c07a18',
-  line: '#d7dbe6',
+  bg: 'var(--dsw-alias-bg-base)',
+  card: 'var(--dsw-alias-bg-layer-3)',
+  cardAlt: 'var(--dsw-alias-bg-module-platform)',
+  text: 'var(--dsw-alias-label-primary)',
+  muted: 'var(--dsw-alias-label-tertiary)',
+  line: 'var(--dsw-alias-border-l2)',
+  on: 'var(--dsw-alias-state-success-primary)',
+  off: 'var(--dsw-alias-label-dimmed)',
+  danger: 'var(--dsw-alias-state-error-primary)',
+  warn: 'var(--dsw-alias-state-warn-primary)',
+  accent: 'var(--dsw-alias-brand-primary)',
+  accent2: 'var(--dsw-alias-brand-primary)',
 }
 
-/** Neumorphic dual shadow: light from top-left, dark from bottom-right. */
+/** Neumorphic dual shadow, theme-adaptive (soft dark + soft light side). */
 function neoShadow(px: number): string {
-  return `${px}px ${px}px ${px * 2}px rgba(163, 170, 190, 0.42), -${px}px -${px}px ${px * 2}px rgba(255, 255, 255, 0.95)`
+  return [
+    `${px}px ${px}px ${px * 2}px color-mix(in srgb, var(--dsw-alias-label-primary) 14%, transparent)`,
+    `-${px}px -${px}px ${px * 2}px color-mix(in srgb, var(--dsw-alias-label-primary) 5%, transparent)`,
+  ].join(', ')
 }
 
-/** Pink → violet signature gradient. */
+/** Pink → violet signature gradient (accent constant, readable on both themes). */
 const NEO_GRADIENT = 'linear-gradient(135deg, #ff7ab8 0%, #a06bff 100%)'
 
 function categoryOf(device: DashboardDevice): string {
@@ -257,8 +262,7 @@ function useConsoleState(tick: number): ConsoleState | null {
 }
 
 // ---------------------------------------------------------------------------
-// Device tiles (reference style: dark glass tiles on the room canvas; on +
-// controllable → white tile with a green power circle; click → advanced
+// Compact neumorphic device cards (theme-adaptive soft UI; click → advanced
 // operations panel)
 // ---------------------------------------------------------------------------
 
@@ -301,43 +305,52 @@ function TileCard({ device, busy, onToggle, onOpen, roomName, stateText }: {
 }): ReactNode {
   const on = powerOn(device)
   const controllable = device.online && CONTROLLABLE.includes(categoryOf(device))
-  const white = controllable && on
-  const bg = white ? 'rgba(255,255,255,0.96)' : 'rgba(30,45,38,0.80)'
-  const fg = white ? '#26382e' : '#f1f5f0'
-  const subColor = white ? 'rgba(38,56,46,0.60)' : 'rgba(240,245,241,0.62)'
   return createElement('div', {
     className: 'mihome-card', onClick: onOpen,
     style: {
-      background: bg, borderRadius: 18, padding: '14px', minHeight: 112,
-      display: 'flex', flexDirection: 'column', gap: 10, cursor: 'pointer',
+      background: NEO.card, borderRadius: 14, padding: '10px 12px', minHeight: 84,
+      display: 'flex', flexDirection: 'column', gap: 6, cursor: 'pointer',
     },
   },
-    createElement('div', { style: { display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 } },
-      createElement('span', { style: { fontSize: 26, opacity: 0.95, filter: 'grayscale(0.2)' } }, iconFor(device)),
+    createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 8 } },
+      createElement('span', {
+        style: {
+          fontSize: 15, width: 28, height: 28, flex: 'none',
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          borderRadius: 9,
+          background: on ? NEO_GRADIENT : 'color-mix(in srgb, var(--dsw-alias-brand-primary) 10%, transparent)',
+          opacity: on ? 1 : 0.92,
+        },
+      }, iconFor(device)),
+      createElement('span', {
+        style: { flex: 1, color: NEO.text, fontSize: 13, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+      }, device.name || device.did),
       ...(controllable
         ? [createElement('button', {
             key: 'pw', onClick: (e) => { e.stopPropagation(); onToggle?.() }, disabled: busy,
             style: {
-              width: 38, height: 38, borderRadius: '50%', border: 'none', flex: 'none',
+              width: 30, height: 30, borderRadius: '50%', border: 'none', flex: 'none',
               display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-              fontSize: 15, cursor: busy ? 'default' : 'pointer', fontFamily: 'inherit',
-              background: on ? 'linear-gradient(160deg, #43d08a, #1f9e68)' : 'rgba(16,26,21,0.38)',
-              color: '#fff',
-              boxShadow: on ? '0 4px 12px rgba(24, 158, 104, 0.35)' : 'inset 0 1px 3px rgba(0, 0, 0, 0.30)',
+              fontSize: 13, cursor: busy ? 'default' : 'pointer', fontFamily: 'inherit',
+              background: on ? 'linear-gradient(160deg, #43d08a, #1f9e68)' : NEO.cardAlt,
+              color: on ? '#fff' : NEO.muted,
+              boxShadow: on ? '0 3px 8px rgba(24, 158, 104, 0.35)' : 'inset 1px 1px 2px rgba(0, 0, 0, 0.12)',
             },
           }, '⏻'),
         ] : [
-          createElement('span', { key: 'st', style: {
-            width: 30, height: 30, borderRadius: '50%', flex: 'none',
-            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-            fontSize: 13, color: 'rgba(255,255,255,0.85)', background: 'rgba(14,22,18,0.30)',
-          } }, device.online ? '⏵' : '⏸'),
+          createElement('span', {
+            key: 'st',
+            style: {
+              width: 26, height: 26, borderRadius: '50%', flex: 'none',
+              display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+              fontSize: 11, color: NEO.muted, background: NEO.cardAlt,
+              boxShadow: 'inset 1px 1px 2px rgba(0, 0, 0, 0.10)',
+            },
+          }, device.online ? '⏵' : '⏸'),
         ]),
     ),
-    createElement('div', { style: { marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 } },
-      createElement('div', { style: { color: fg, fontSize: 14, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
-        device.name || device.did),
-      createElement('div', { style: { color: subColor, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
+    createElement('div', { style: { display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 } },
+      createElement('div', { style: { color: NEO.muted, fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
         [roomName, stateText].filter(Boolean).join(' · ') || '—'),
     ),
   )
@@ -413,9 +426,9 @@ function DeviceSheet({ device, roomName, busy, onClose, onAction }: {
       key: device.did,
       style: {
         width: 'min(500px, 92vw)',
-        background: 'rgba(19, 25, 22, 0.97)',
-        borderRadius: 26, padding: '22px 24px 12px',
-        color: '#eef3ee', display: 'flex', flexDirection: 'column', gap: 16,
+        background: 'var(--dsw-alias-bg-overlay)',
+        borderRadius: 24, padding: '20px 22px 10px',
+        color: 'var(--dsw-alias-label-primary)', display: 'flex', flexDirection: 'column', gap: 14,
         boxShadow: '0 26px 70px rgba(0, 0, 0, 0.5)',
       },
     },
@@ -424,7 +437,7 @@ function DeviceSheet({ device, roomName, busy, onClose, onAction }: {
         createElement('div', { style: { flex: 1, minWidth: 0 } },
           createElement('div', { style: { fontSize: 16, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
             device.name || device.did),
-          createElement('div', { style: { fontSize: 12, color: 'rgba(238,243,238,0.55)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
+          createElement('div', { style: { fontSize: 12, color: 'var(--dsw-alias-label-tertiary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
             [roomName, device.model].filter(Boolean).join(' · ')),
         ),
         createElement('button', {
@@ -441,10 +454,10 @@ function DeviceSheet({ device, roomName, busy, onClose, onAction }: {
       // Big metric
       createElement('div', { style: { textAlign: 'center', padding: '6px 0' } },
         createElement('div', { style: { display: 'inline-flex', alignItems: 'baseline', gap: 4 } },
-          createElement('span', { style: { fontSize: 44, fontWeight: 300, color: '#fff', letterSpacing: '-0.02em' } }, metric.value),
-          createElement('span', { style: { fontSize: 16, color: 'rgba(238,243,238,0.65)' } }, metric.unit),
+          createElement('span', { style: { fontSize: 42, fontWeight: 300, color: 'var(--dsw-alias-label-primary)', letterSpacing: '-0.02em' } }, metric.value),
+          createElement('span', { style: { fontSize: 15, color: 'var(--dsw-alias-label-tertiary)' } }, metric.unit),
         ),
-        createElement('div', { style: { fontSize: 12, color: 'rgba(238,243,238,0.55)', marginTop: 2 } }, metric.label),
+        createElement('div', { style: { fontSize: 12, color: 'var(--dsw-alias-label-tertiary)', marginTop: 2 } }, metric.label),
       ),
       // Mode circles (light: brightness presets; climate: mode presets)
       ...(modes.length > 0 ? [
@@ -457,11 +470,11 @@ function DeviceSheet({ device, roomName, busy, onClose, onAction }: {
                 style: {
                   width: 54, height: 54, borderRadius: '50%', border: 'none', fontFamily: 'inherit',
                   fontSize: 20, fontWeight: 700, cursor: busy ? 'default' : 'pointer',
-                  background: activeMode(mode) ? 'linear-gradient(160deg, #3da5f5, #2b7fe0)' : 'rgba(255,255,255,0.10)',
+                  background: activeMode(mode) ? 'linear-gradient(160deg, #3da5f5, #2b7fe0)' : 'color-mix(in srgb, var(--dsw-alias-label-primary) 8%, transparent)',
                   color: '#fff',
                 },
               }, mode.icon),
-              createElement('span', { style: { fontSize: 12, color: activeMode(mode) ? '#8fc8ff' : 'rgba(238,243,238,0.72)' } }, mode.label),
+              createElement('span', { style: { fontSize: 12, color: activeMode(mode) ? 'var(--dsw-alias-brand-primary)' : 'var(--dsw-alias-label-secondary)' } }, mode.label),
             ),
           ),
         ),
@@ -470,18 +483,18 @@ function DeviceSheet({ device, roomName, busy, onClose, onAction }: {
       createElement('button', {
         onClick: () => setMore(m => !m),
         style: {
-          width: '100%', padding: '10px 0', border: 'none', background: 'transparent',
-          borderTop: '1px solid rgba(255,255,255,0.08)',
-          color: 'rgba(238,243,238,0.65)', fontSize: 13, cursor: 'pointer', fontFamily: 'inherit',
+          width: '100%', padding: '9px 0', border: 'none', background: 'transparent',
+          borderTop: '1px solid color-mix(in srgb, var(--dsw-alias-label-primary) 8%, transparent)',
+          color: 'var(--dsw-alias-label-secondary)', fontSize: 13, cursor: 'pointer', fontFamily: 'inherit',
         },
       }, '更多操作'),
       ...(more ? [
         createElement('div', {
           key: 'raw',
           style: {
-            background: 'rgba(0,0,0,0.30)', borderRadius: 12, padding: '10px 12px',
+            background: 'color-mix(in srgb, var(--dsw-alias-label-primary) 5%, transparent)', borderRadius: 12, padding: '10px 12px',
             fontFamily: 'ui-monospace, Menlo, monospace', fontSize: 12,
-            color: 'rgba(238,243,238,0.70)', lineHeight: 1.7, wordBreak: 'break-all',
+            color: 'var(--dsw-alias-label-secondary)', lineHeight: 1.7, wordBreak: 'break-all',
             maxHeight: 140, overflowY: 'auto',
           },
         },
@@ -564,18 +577,18 @@ function MihomeView(): ReactNode {
   return createElement('div', {
     style: {
       height: '100%', overflowY: 'auto',
-      background: 'linear-gradient(165deg, #cdd8c3 0%, #b7c9ab 100%)',
+      background: NEO.bg,
       fontFamily: 'system-ui, -apple-system, "PingFang SC", sans-serif',
     },
   },
-    createElement('div', { style: { maxWidth: 1100, margin: '0 auto', padding: '22px 24px 40px' } },
+    createElement('div', { style: { maxWidth: 1040, margin: '0 auto', padding: '16px 20px 28px' } },
       // Top bar
-      createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 10, marginBottom: 18 } },
-        createElement('span', { style: { fontSize: 20 } }, '🏠'),
-        createElement('span', { style: { color: NEO.text, fontSize: 18, fontWeight: 800 } }, '米家控制台'),
+      createElement('div', { style: { display: 'flex', alignItems: 'center', gap: 10, marginBottom: 14 } },
+        createElement('span', { style: { fontSize: 18 } }, '🏠'),
+        createElement('span', { style: { color: NEO.text, fontSize: 16, fontWeight: 800 } }, '米家控制台'),
         createElement('span', {
           style: {
-            padding: '4px 12px', borderRadius: 99, fontSize: 11, fontWeight: 700,
+            padding: '3px 10px', borderRadius: 99, fontSize: 10, fontWeight: 700,
             color: pill.color, background: pill.bg,
           },
         }, pill.text),
@@ -590,10 +603,10 @@ function MihomeView(): ReactNode {
         createElement('button', {
           onClick: () => setTick(t => t + 1),
           style: {
-            height: 32, padding: '0 14px', borderRadius: 12,
+            height: 28, padding: '0 12px', borderRadius: 10,
             background: NEO.card, border: 'none',
-            boxShadow: neoShadow(4), color: NEO.text,
-            fontSize: 13, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
+            boxShadow: neoShadow(3), color: NEO.text,
+            fontSize: 12, fontWeight: 600, cursor: 'pointer', fontFamily: 'inherit',
           },
         }, '↻ 刷新'),
       ),
@@ -602,40 +615,40 @@ function MihomeView(): ReactNode {
         createElement('div', {
           key: 'hero', className: 'mihome-hero',
           style: {
-            maxWidth: 520, margin: '48px auto 0', textAlign: 'center',
-            background: NEO.card, borderRadius: 24, padding: '38px 30px',
-            boxShadow: neoShadow(10),
-            display: 'flex', flexDirection: 'column', gap: 10,
+            maxWidth: 440, margin: '40px auto 0', textAlign: 'center',
+            background: NEO.card, borderRadius: 20, padding: '26px 22px',
+            boxShadow: neoShadow(8),
+            display: 'flex', flexDirection: 'column', gap: 8,
           },
         },
-          createElement('div', { style: { fontSize: 44 } }, '🏠'),
-          createElement('div', { style: { color: NEO.text, fontSize: 18, fontWeight: 800 } }, '米家还没有连接'),
-          createElement('div', { style: { color: NEO.muted, fontSize: 13, lineHeight: 1.7 } }, '两步接入你的米家设备：'),
+          createElement('div', { style: { fontSize: 34 } }, '🏠'),
+          createElement('div', { style: { color: NEO.text, fontSize: 16, fontWeight: 800 } }, '米家还没有连接'),
+          createElement('div', { style: { color: NEO.muted, fontSize: 12, lineHeight: 1.7 } }, '两步接入你的米家设备：'),
           createElement('div', {
             style: {
-              textAlign: 'left', background: '#e2e6ef',
-              boxShadow: 'inset 3px 3px 6px rgba(163, 170, 190, 0.45), inset -3px -3px 6px rgba(255, 255, 255, 0.95)',
-              borderRadius: 14, padding: '14px 16px', margin: '6px 0 2px',
-              display: 'flex', flexDirection: 'column', gap: 6,
+              textAlign: 'left', background: 'color-mix(in srgb, var(--dsw-alias-label-primary) 6%, transparent)',
+              boxShadow: 'inset 2px 2px 5px color-mix(in srgb, var(--dsw-alias-label-primary) 10%, transparent), inset -2px -2px 5px color-mix(in srgb, var(--dsw-alias-bg-base) 60%, transparent)',
+              borderRadius: 12, padding: '10px 12px', margin: '4px 0 2px',
+              display: 'flex', flexDirection: 'column', gap: 5,
             },
           },
-            createElement('div', { style: { color: NEO.text, fontSize: 13 } }, '① 打开 DSH 设置 → 米家登录'),
-            createElement('div', { style: { color: NEO.text, fontSize: 13 } }, '② 生成二维码，用米家 App 扫一扫并确认'),
-            createElement('div', { style: { color: NEO.muted, fontSize: 12, lineHeight: 1.6 } },
+            createElement('div', { style: { color: NEO.text, fontSize: 12 } }, '① 打开 DSH 设置 → 米家登录'),
+            createElement('div', { style: { color: NEO.text, fontSize: 12 } }, '② 生成二维码，用米家 App 扫一扫并确认'),
+            createElement('div', { style: { color: NEO.muted, fontSize: 11, lineHeight: 1.6 } },
               '登录成功后会保存会话，本页自动显示房间、设备与最近变化。'),
           ),
           ...(state?.error ? [
             createElement('div', {
-              key: 'why', style: { color: NEO.muted, fontSize: 12, wordBreak: 'break-all', lineHeight: 1.6 },
+              key: 'why', style: { color: NEO.muted, fontSize: 11, wordBreak: 'break-all', lineHeight: 1.6 },
             }, `原因：${state.error}`),
           ] : []),
           createElement('button', {
             onClick: () => setTick(t => t + 1),
             style: {
-              alignSelf: 'center', marginTop: 6, height: 36, padding: '0 18px', borderRadius: 99,
+              alignSelf: 'center', marginTop: 4, height: 30, padding: '0 14px', borderRadius: 99,
               background: NEO_GRADIENT, border: 'none',
-              boxShadow: neoShadow(5), color: '#fff',
-              fontSize: 13, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit',
+              boxShadow: neoShadow(4), color: '#fff',
+              fontSize: 12, fontWeight: 700, cursor: 'pointer', fontFamily: 'inherit',
             },
           }, '↻ 重新检查'),
         ),
@@ -644,16 +657,16 @@ function MihomeView(): ReactNode {
       ...(loading ? [
         createElement('div', {
           key: 'skeleton',
-          style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))', gap: 12 },
+          style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(210px, 1fr))', gap: 10 },
         },
           ...Array.from({ length: 6 }, (_, i) =>
             createElement('div', {
               key: i,
               style: {
-                background: NEO.card, borderRadius: 18, height: 84,
-                boxShadow: neoShadow(4),
+                background: NEO.card, borderRadius: 14, height: 72,
+                boxShadow: neoShadow(3),
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
-                color: NEO.muted, fontSize: 12,
+                color: NEO.muted, fontSize: 11,
               },
             }, '连接中…')),
         ),
@@ -683,22 +696,23 @@ function MihomeView(): ReactNode {
           createElement('div', {
             key: 'notice',
             style: {
-              background: '#f6ecd9', border: '1px solid rgba(192, 122, 24, 0.35)',
-              borderRadius: 14, padding: '10px 14px', color: NEO.warn, fontSize: 13, marginBottom: 12,
-              boxShadow: neoShadow(3),
+              background: 'color-mix(in srgb, var(--dsw-alias-state-warn-primary) 12%, transparent)',
+              border: '1px solid color-mix(in srgb, var(--dsw-alias-state-warn-primary) 35%, transparent)',
+              borderRadius: 12, padding: '8px 12px', color: NEO.warn, fontSize: 12, marginBottom: 10,
+              boxShadow: neoShadow(2),
             },
           }, `⚠️ ${notice}`),
         ] : []),
         // Summary line
         createElement('div', {
           key: 'summary',
-          style: { color: NEO.muted, fontSize: 12, marginBottom: 14 },
+          style: { color: NEO.muted, fontSize: 11, marginBottom: 10 },
         }, `${visibleDevices.length} 台设备（${visibleDevices.filter(d => d.online).length} 在线）· 每 3 秒自动刷新 · 卡片拨动开关即点即控（人工操作，类别白名单生效）`),
         // Device groups
         ...groups.map(group =>
-          createElement('div', { key: group.title, style: { marginBottom: 18 } },
-            createElement('div', { style: { color: '#71788a', fontSize: 12, marginBottom: 10, fontWeight: 800, letterSpacing: '0.04em' } }, group.title),
-            createElement('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(250px, 1fr))', gap: 12 } },
+          createElement('div', { key: group.title, style: { marginBottom: 12 } },
+            createElement('div', { style: { color: NEO.muted, fontSize: 11, marginBottom: 6, fontWeight: 700, letterSpacing: '0.04em' } }, group.title),
+            createElement('div', { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(210px, 1fr))', gap: 10 } },
               ...group.items.map(device => deviceCardFor(
                 device,
                 busyDid === device.did,
@@ -712,12 +726,12 @@ function MihomeView(): ReactNode {
         // Recent events
         ...(snapshot.events.length > 0 ? [
           createElement('div', {
-            key: 'events', style: { marginTop: 8, paddingTop: 14, borderTop: `1px solid ${NEO.line}` },
+            key: 'events', style: { marginTop: 6, paddingTop: 10, borderTop: `1px solid ${NEO.line}` },
           },
-            createElement('div', { style: { color: NEO.muted, fontSize: 12, marginBottom: 6, fontWeight: 700 } }, '🕐 最近变化'),
+            createElement('div', { style: { color: NEO.muted, fontSize: 11, marginBottom: 4, fontWeight: 700 } }, '🕐 最近变化'),
             ...snapshot.events.slice(0, 8).map((event, i) =>
               createElement('div', {
-                key: i, style: { color: NEO.muted, fontSize: 13, display: 'flex', gap: 8, padding: '2px 0' },
+                key: i, style: { color: NEO.muted, fontSize: 12, display: 'flex', gap: 8, padding: '2px 0' },
               },
                 createElement('span', {}, '📌'),
                 createElement('span', { style: { flex: 1 } },
@@ -742,14 +756,14 @@ function MihomeView(): ReactNode {
   )
 }
 
-/** Active/inactive chip style for the room filter (neumorphic). */
+/** Active/inactive chip style for the room filter (compact neumorphic). */
 function roomChipStyle(active: boolean): React.CSSProperties {
   return {
-    fontSize: 12, cursor: 'pointer', fontFamily: 'inherit', fontWeight: 700,
+    fontSize: 11, cursor: 'pointer', fontFamily: 'inherit', fontWeight: 700,
     color: active ? '#fff' : NEO.text,
     background: active ? NEO_GRADIENT : NEO.card,
-    border: 'none', borderRadius: 99, padding: '6px 14px',
-    boxShadow: active ? neoShadow(3) : neoShadow(4),
+    border: 'none', borderRadius: 99, padding: '4px 10px',
+    boxShadow: active ? neoShadow(2) : neoShadow(3),
   }
 }
 
@@ -1014,8 +1028,8 @@ export function apply(ctx: ClientContext & Context): void {
       const tag = document.createElement('style')
       tag.setAttribute('data-mihome-styles', '')
       tag.textContent = [
-        '.mihome-card { box-shadow: 8px 8px 18px rgba(163, 170, 190, 0.40), -8px -8px 18px rgba(255, 255, 255, 0.92); transition: box-shadow .15s ease, transform .15s ease; }',
-        '.mihome-card:hover { transform: translateY(-2px); box-shadow: 11px 11px 24px rgba(163, 170, 190, 0.48), -11px -11px 24px rgba(255, 255, 255, 1); }',
+        '.mihome-card { box-shadow: 6px 6px 14px color-mix(in srgb, var(--dsw-alias-label-primary) 12%, transparent), -6px -6px 14px color-mix(in srgb, var(--dsw-alias-label-primary) 4%, transparent); transition: box-shadow .15s ease, transform .15s ease; }',
+        '.mihome-card:hover { transform: translateY(-2px); box-shadow: 9px 9px 20px color-mix(in srgb, var(--dsw-alias-label-primary) 16%, transparent), -9px -9px 20px color-mix(in srgb, var(--dsw-alias-label-primary) 6%, transparent); }',
         '.mihome-hero { animation: mihome-pop .28s ease both; }',
         '@keyframes mihome-pop { from { opacity: 0; transform: translateY(8px) } to { opacity: 1; transform: none } }',
       ].join('\n')
