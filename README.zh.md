@@ -81,6 +81,7 @@ dsh plugin --profile web add dsh-mihome
     requireApproval: true      # 改变状态的调用需要人工批准
     allowedCategories: []      # 可控制类别白名单，例如 [light, outlet, climate]；留空 = 全部允许
     dashboardPropsLimit: 30    # 仪表盘拉取属性的设备上限
+    serviceRefreshMs: 20000   # 常驻宿主服务刷新间隔（设备/属性镜像在内存，前端秒开）
     recentBufferSize: 50       # 最近变化缓冲大小
 ```
 
