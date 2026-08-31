@@ -35,32 +35,28 @@ const COLORS = {
 }
 
 // ---------------------------------------------------------------------------
-// Neumorphic palette driven by the app theme tokens: every color resolves
-// through the `--dsw-alias-*` variables, so the console follows the DSH
-// light/dark theme automatically. Shadows are soft dual "neumorphic" ones
-// computed with color-mix from the theme text color.
+// Neumorphic palette: SELF-OWNED CSS variables (light + dark defaults in the
+// injected stylesheet, auto-switched via prefers-color-scheme), so the soft
+// dual-shadow look survives any render context and follows the OS/app scheme.
 // ---------------------------------------------------------------------------
 const NEO = {
-  bg: 'var(--dsw-alias-bg-base)',
-  card: 'var(--dsw-alias-bg-layer-3)',
-  cardAlt: 'var(--dsw-alias-bg-module-platform)',
-  text: 'var(--dsw-alias-label-primary)',
-  muted: 'var(--dsw-alias-label-tertiary)',
-  line: 'var(--dsw-alias-border-l2)',
-  on: 'var(--dsw-alias-state-success-primary)',
-  off: 'var(--dsw-alias-label-dimmed)',
-  danger: 'var(--dsw-alias-state-error-primary)',
-  warn: 'var(--dsw-alias-state-warn-primary)',
-  accent: 'var(--dsw-alias-brand-primary)',
-  accent2: 'var(--dsw-alias-brand-primary)',
+  bg: 'var(--mihome-bg)',
+  card: 'var(--mihome-card)',
+  cardAlt: 'var(--mihome-card)',
+  text: 'var(--mihome-text)',
+  muted: 'var(--mihome-muted)',
+  line: 'var(--mihome-line)',
+  on: '#21c48b',
+  off: 'var(--mihome-muted)',
+  danger: '#ec5f7b',
+  warn: '#c07a18',
+  accent: '#e8559b',
+  accent2: '#8f6bff',
 }
 
-/** Neumorphic dual shadow, theme-adaptive (soft dark + soft light side). */
+/** Neumorphic dual shadow (chips, buttons, pressed wells). */
 function neoShadow(px: number): string {
-  return [
-    `${px}px ${px}px ${px * 2}px color-mix(in srgb, var(--dsw-alias-label-primary) 14%, transparent)`,
-    `-${px}px -${px}px ${px * 2}px color-mix(in srgb, var(--dsw-alias-label-primary) 5%, transparent)`,
-  ].join(', ')
+  return `${px}px ${px}px ${px * 2}px var(--mihome-shadow-a), -${px}px -${px}px ${px * 2}px var(--mihome-shadow-b)`
 }
 
 /** Pink → violet signature gradient (accent constant, readable on both themes). */
@@ -318,7 +314,7 @@ function TileCard({ device, busy, onToggle, onOpen, roomName, stateText }: {
           fontSize: 15, width: 28, height: 28, flex: 'none',
           display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
           borderRadius: 9,
-          background: on ? NEO_GRADIENT : 'color-mix(in srgb, var(--dsw-alias-brand-primary) 10%, transparent)',
+          background: on ? NEO_GRADIENT : 'rgba(232, 85, 155, 0.12)',
           opacity: on ? 1 : 0.92,
         },
       }, iconFor(device)),
@@ -426,9 +422,9 @@ function DeviceSheet({ device, roomName, busy, onClose, onAction }: {
       key: device.did,
       style: {
         width: 'min(500px, 92vw)',
-        background: 'var(--dsw-alias-bg-overlay)',
+        background: 'var(--mihome-sheet)',
         borderRadius: 24, padding: '20px 22px 10px',
-        color: 'var(--dsw-alias-label-primary)', display: 'flex', flexDirection: 'column', gap: 14,
+        color: 'var(--mihome-text)', display: 'flex', flexDirection: 'column', gap: 14,
         boxShadow: '0 26px 70px rgba(0, 0, 0, 0.5)',
       },
     },
@@ -437,7 +433,7 @@ function DeviceSheet({ device, roomName, busy, onClose, onAction }: {
         createElement('div', { style: { flex: 1, minWidth: 0 } },
           createElement('div', { style: { fontSize: 16, fontWeight: 700, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
             device.name || device.did),
-          createElement('div', { style: { fontSize: 12, color: 'var(--dsw-alias-label-tertiary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
+          createElement('div', { style: { fontSize: 12, color: 'var(--mihome-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
             [roomName, device.model].filter(Boolean).join(' · ')),
         ),
         createElement('button', {
@@ -454,10 +450,10 @@ function DeviceSheet({ device, roomName, busy, onClose, onAction }: {
       // Big metric
       createElement('div', { style: { textAlign: 'center', padding: '6px 0' } },
         createElement('div', { style: { display: 'inline-flex', alignItems: 'baseline', gap: 4 } },
-          createElement('span', { style: { fontSize: 42, fontWeight: 300, color: 'var(--dsw-alias-label-primary)', letterSpacing: '-0.02em' } }, metric.value),
-          createElement('span', { style: { fontSize: 15, color: 'var(--dsw-alias-label-tertiary)' } }, metric.unit),
+          createElement('span', { style: { fontSize: 42, fontWeight: 300, color: 'var(--mihome-text)', letterSpacing: '-0.02em' } }, metric.value),
+          createElement('span', { style: { fontSize: 15, color: 'var(--mihome-muted)' } }, metric.unit),
         ),
-        createElement('div', { style: { fontSize: 12, color: 'var(--dsw-alias-label-tertiary)', marginTop: 2 } }, metric.label),
+        createElement('div', { style: { fontSize: 12, color: 'var(--mihome-muted)', marginTop: 2 } }, metric.label),
       ),
       // Mode circles (light: brightness presets; climate: mode presets)
       ...(modes.length > 0 ? [
@@ -470,11 +466,11 @@ function DeviceSheet({ device, roomName, busy, onClose, onAction }: {
                 style: {
                   width: 54, height: 54, borderRadius: '50%', border: 'none', fontFamily: 'inherit',
                   fontSize: 20, fontWeight: 700, cursor: busy ? 'default' : 'pointer',
-                  background: activeMode(mode) ? 'linear-gradient(160deg, #3da5f5, #2b7fe0)' : 'color-mix(in srgb, var(--dsw-alias-label-primary) 8%, transparent)',
+                  background: activeMode(mode) ? 'linear-gradient(160deg, #3da5f5, #2b7fe0)' : 'rgba(128, 134, 150, 0.18)',
                   color: '#fff',
                 },
               }, mode.icon),
-              createElement('span', { style: { fontSize: 12, color: activeMode(mode) ? 'var(--dsw-alias-brand-primary)' : 'var(--dsw-alias-label-secondary)' } }, mode.label),
+              createElement('span', { style: { fontSize: 12, color: activeMode(mode) ? '#3d9bee' : 'var(--mihome-muted)' } }, mode.label),
             ),
           ),
         ),
@@ -484,17 +480,17 @@ function DeviceSheet({ device, roomName, busy, onClose, onAction }: {
         onClick: () => setMore(m => !m),
         style: {
           width: '100%', padding: '9px 0', border: 'none', background: 'transparent',
-          borderTop: '1px solid color-mix(in srgb, var(--dsw-alias-label-primary) 8%, transparent)',
-          color: 'var(--dsw-alias-label-secondary)', fontSize: 13, cursor: 'pointer', fontFamily: 'inherit',
+          borderTop: '1px solid var(--mihome-line)',
+          color: 'var(--mihome-muted)', fontSize: 13, cursor: 'pointer', fontFamily: 'inherit',
         },
       }, '更多操作'),
       ...(more ? [
         createElement('div', {
           key: 'raw',
           style: {
-            background: 'color-mix(in srgb, var(--dsw-alias-label-primary) 5%, transparent)', borderRadius: 12, padding: '10px 12px',
+            background: 'rgba(128, 134, 150, 0.12)', borderRadius: 12, padding: '10px 12px',
             fontFamily: 'ui-monospace, Menlo, monospace', fontSize: 12,
-            color: 'var(--dsw-alias-label-secondary)', lineHeight: 1.7, wordBreak: 'break-all',
+            color: 'var(--mihome-muted)', lineHeight: 1.7, wordBreak: 'break-all',
             maxHeight: 140, overflowY: 'auto',
           },
         },
@@ -626,8 +622,8 @@ function MihomeView(): ReactNode {
           createElement('div', { style: { color: NEO.muted, fontSize: 12, lineHeight: 1.7 } }, '两步接入你的米家设备：'),
           createElement('div', {
             style: {
-              textAlign: 'left', background: 'color-mix(in srgb, var(--dsw-alias-label-primary) 6%, transparent)',
-              boxShadow: 'inset 2px 2px 5px color-mix(in srgb, var(--dsw-alias-label-primary) 10%, transparent), inset -2px -2px 5px color-mix(in srgb, var(--dsw-alias-bg-base) 60%, transparent)',
+              textAlign: 'left', background: 'rgba(128, 134, 150, 0.10)',
+              boxShadow: 'inset 2px 2px 5px var(--mihome-inset-a), inset -2px -2px 5px var(--mihome-inset-b)',
               borderRadius: 12, padding: '10px 12px', margin: '4px 0 2px',
               display: 'flex', flexDirection: 'column', gap: 5,
             },
@@ -696,8 +692,8 @@ function MihomeView(): ReactNode {
           createElement('div', {
             key: 'notice',
             style: {
-              background: 'color-mix(in srgb, var(--dsw-alias-state-warn-primary) 12%, transparent)',
-              border: '1px solid color-mix(in srgb, var(--dsw-alias-state-warn-primary) 35%, transparent)',
+              background: 'rgba(192, 122, 24, 0.12)',
+              border: '1px solid rgba(192, 122, 24, 0.35)',
               borderRadius: 12, padding: '8px 12px', color: NEO.warn, fontSize: 12, marginBottom: 10,
               boxShadow: neoShadow(2),
             },
@@ -1028,8 +1024,20 @@ export function apply(ctx: ClientContext & Context): void {
       const tag = document.createElement('style')
       tag.setAttribute('data-mihome-styles', '')
       tag.textContent = [
-        '.mihome-card { box-shadow: 6px 6px 14px color-mix(in srgb, var(--dsw-alias-label-primary) 12%, transparent), -6px -6px 14px color-mix(in srgb, var(--dsw-alias-label-primary) 4%, transparent); transition: box-shadow .15s ease, transform .15s ease; }',
-        '.mihome-card:hover { transform: translateY(-2px); box-shadow: 9px 9px 20px color-mix(in srgb, var(--dsw-alias-label-primary) 16%, transparent), -9px -9px 20px color-mix(in srgb, var(--dsw-alias-label-primary) 6%, transparent); }',
+        ':root {',
+        '  --mihome-bg: #e9ecf3; --mihome-card: #eef1f6; --mihome-text: #3d4356; --mihome-muted: #8f96a8; --mihome-line: #d7dbe6; --mihome-sheet: #f4f6fa;',
+        '  --mihome-shadow-a: rgba(163, 170, 190, 0.42); --mihome-shadow-b: rgba(255, 255, 255, 0.95);',
+        '  --mihome-inset-a: rgba(163, 170, 190, 0.45); --mihome-inset-b: rgba(255, 255, 255, 0.95);',
+        '}',
+        '@media (prefers-color-scheme: dark) {',
+        '  :root {',
+        '    --mihome-bg: #1a2026; --mihome-card: #242b33; --mihome-text: #e6e9ee; --mihome-muted: #8b93a1; --mihome-line: #2c343d; --mihome-sheet: #1f262d;',
+        '    --mihome-shadow-a: rgba(0, 0, 0, 0.55); --mihome-shadow-b: rgba(255, 255, 255, 0.06);',
+        '    --mihome-inset-a: rgba(0, 0, 0, 0.50); --mihome-inset-b: rgba(255, 255, 255, 0.05);',
+        '  }',
+        '}',
+        '.mihome-card { transition: box-shadow .15s ease, transform .15s ease; }',
+        '.mihome-card:hover { transform: translateY(-2px); box-shadow: 9px 9px 20px var(--mihome-shadow-a), -9px -9px 20px var(--mihome-shadow-b); }',
         '.mihome-hero { animation: mihome-pop .28s ease both; }',
         '@keyframes mihome-pop { from { opacity: 0; transform: translateY(8px) } to { opacity: 1; transform: none } }',
       ].join('\n')
