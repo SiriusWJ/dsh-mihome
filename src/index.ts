@@ -6,7 +6,8 @@ import { join } from 'node:path'
 import { Config as ConfigSchema, type Config } from './config'
 import { MiCloudClient, categoryOf } from './mi'
 import { QrLoginManager, QrSessionStore } from './qr'
-import { registerTools, cachedDevices, ChangeBuffer, buildDashboardSnapshot } from './tools'
+import { MiHomeService } from './service'
+import { registerTools, ChangeBuffer } from './tools'
 
 export const name = 'dsh-mihome'
 export const inject = ['tools']
@@ -60,7 +61,20 @@ export function apply(ctx: Context, config: Config) {
 
   const changes = new ChangeBuffer(config.recentBufferSize)
 
-  registerTools(ctx, client, config, changes)
+  // Resident host service: mirrors homes/devices/props in memory, persists
+  // the last snapshot to disk, and refreshes on a background interval — the
+  // web UI and tools read the mirror instantly instead of hitting the cloud.
+  const cacheFile = join(
+    process.env.DSH_HOME ?? join(homedir(), '.dsh'),
+    'plugin-data', 'dsh-mihome', 'device-cache.json',
+  )
+  const service = new MiHomeService(client, config, changes, cacheFile)
+  ctx.effect(() => {
+    service.start()
+    return () => { void service.dispose() }
+  }, 'dsh-mihome.service')
+
+  registerTools(ctx, client, config, changes, service)
 
   // Read-only state + auth routes. This runtime exposes the browser server
   // to bundle plugins through hard injection — `ctx.get('webServer')` returns
@@ -98,15 +112,17 @@ export function apply(ctx: Context, config: Config) {
       kind: 'exact',
       path: '/dsh-mihome/state',
       handler: async (_req, res) => {
-        try {
-          const [snapshot, health] = await Promise.all([
-            buildDashboardSnapshot(client, config, changes),
-            client.health(),
-          ])
-          sendJson(res, 200, { ok: true, snapshot, health })
-        } catch (err) {
-          sendJson(res, 200, { ok: false, error: err instanceof Error ? err.message : String(err) })
-        }
+        // Instant: read the resident service mirror (memory), never the cloud.
+        const status = service.getStatus()
+        const snapshot = service.snapshot()
+        const hasData = snapshot.devices.length > 0
+        sendJson(res, 200, {
+          ok: status.status === 'connected' || hasData,
+          snapshot,
+          health: service.health(),
+          service: status,
+          ...(status.status === 'error' ? { error: status.lastError ?? '刷新失败' } : {}),
+        })
       },
     }), 'dsh-mihome.web')
     // Console control: the user clicks a device card toggle — a human
@@ -128,7 +144,7 @@ export function apply(ctx: Context, config: Config) {
           return
         }
         try {
-          const { devices } = await cachedDevices(client)
+          const { devices } = service.devicesMirror()
           const device = devices.find(d => d.did === deviceId)
           if (!device) {
             sendJson(res, 200, { ok: false, error: `未找到设备 ${deviceId}` })
@@ -144,6 +160,7 @@ export function apply(ctx: Context, config: Config) {
             return
           }
           await client.rawCommand(device.did, 'set_power', [on ? 'on' : 'off'])
+          service.patchDeviceProps(device.did, { power: on ? 1 : 0 })
           changes.push({
             did: device.did,
             name: device.name,
@@ -219,7 +236,7 @@ export function apply(ctx: Context, config: Config) {
       const deviceId = typeof args?.deviceId === 'string' ? args.deviceId : undefined
       if (deviceId) {
         try {
-          const { devices } = await cachedDevices(client)
+          const { devices } = service.devicesMirror()
           const dev = devices.find(d => d.did === deviceId)
           if (!dev || !config.allowedCategories.includes(categoryOf(dev.model))) {
             return {

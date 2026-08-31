@@ -131,28 +131,27 @@ export async function buildDashboardSnapshot(
   }
 }
 
-/** Turn a raw connection error into a friendly, actionable message. */
-function friendlyConnError(err: unknown): string {
-  const raw = err instanceof Error ? err.message.replace(/^dsh-mihome: /, '') : String(err)
-  if (/未配置米家账号/.test(raw) || /MIHOME_USERNAME/.test(raw)) {
-    return '尚未登录米家账号——打开 DSH 设置 → 米家登录，用米家 App 扫码即可；或配置 MIHOME_USERNAME / MIHOME_PASSWORD 环境变量。'
-  }
-  if (/登录失败/.test(raw)) {
-    return `米家登录失败（${raw}）。如账号触发了风控验证，请改用设置页的扫码登录。`
-  }
-  return `无法连接米家云端（${raw}）。请检查网络后重试，或到 设置 → 米家登录 重新登录。`
-}
-
 // ---------------------------------------------------------------------------
 // Tool registration
 // ---------------------------------------------------------------------------
+
+/** Optional host-side device mirror (resident service): tools read it
+ * instantly instead of hitting the cloud per call. */
+export interface MiDeviceMirror {
+  devicesMirror(): { homes: HomeInfo[]; devices: DeviceInfo[] }
+  snapshot(): DashboardSnapshot
+}
 
 export function registerTools(
   ctx: Context,
   client: MiClient,
   config: Config,
   changes: ChangeBuffer,
+  mirror?: MiDeviceMirror,
 ): void {
+  const loadDevices = (): Promise<{ homes: HomeInfo[]; devices: DeviceInfo[] }> =>
+    mirror ? Promise.resolve(mirror.devicesMirror()) : cachedDevices(client)
+
   ctx.tools.register(defineTool({
     name: 'mi_health',
     description:
@@ -292,7 +291,7 @@ export function registerTools(
       },
     },
     async execute(args) {
-      const { devices } = await cachedDevices(client)
+      const { devices } = await loadDevices()
       const query = (args.query ?? '').toLowerCase()
       const limit = Math.min(Math.max(args.limit ?? 100, 1), 300)
       const filtered = devices
@@ -343,7 +342,7 @@ export function registerTools(
       },
     },
     async execute(args) {
-      const { devices } = await cachedDevices(client)
+      const { devices } = await loadDevices()
       const device = deviceById(devices, args.deviceId)
       if (!device) throw new Error(`dsh-mihome: 未找到设备 ${args.deviceId}（先调用 mi_list_devices）`)
       const category = categoryOf(device.model)
@@ -396,7 +395,7 @@ export function registerTools(
       }
     },
     async execute(args) {
-      const { devices } = await cachedDevices(client)
+      const { devices } = await loadDevices()
       const device = deviceById(devices, args.deviceId)
       if (!device) throw new Error(`dsh-mihome: 未找到设备 ${args.deviceId}`)
       await client.rawCommand(device.did, 'set_power', [args.on ? 'on' : 'off'])
@@ -455,7 +454,7 @@ export function registerTools(
       }
     },
     async execute(args) {
-      const { devices } = await cachedDevices(client)
+      const { devices } = await loadDevices()
       const device = deviceById(devices, args.deviceId)
       if (!device) throw new Error(`dsh-mihome: 未找到设备 ${args.deviceId}`)
       const params = Array.isArray(args.params) ? args.params as unknown[]
@@ -568,22 +567,12 @@ export function registerTools(
       }
     },
     async execute() {
-      let snapshot: DashboardSnapshot
-      try {
-        snapshot = await buildDashboardSnapshot(client, config, changes)
-      } catch (err) {
-        // Not connected: hand the client enough to render a friendly offline
-        // state instead of a raw tool error.
-        snapshot = {
-          kind: DASHBOARD_META_KIND,
-          generatedAt: new Date().toISOString(),
-          homes: [],
-          rooms: [],
-          devices: [],
-          events: [],
-          error: friendlyConnError(err),
-        }
+      // Resident service mirror: instant, no cloud round-trip.
+      if (mirror) {
+        const snapshot = mirror.snapshot()
+        return snapshot as unknown as JsonValue
       }
+      const snapshot = await buildDashboardSnapshot(client, config, changes)
       return snapshot as unknown as JsonValue
     },
   }))

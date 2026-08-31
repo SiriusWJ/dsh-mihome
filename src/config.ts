@@ -19,6 +19,8 @@ export interface Config {
   allowedCategories: string[]
   /** Devices whose props are fetched for a dashboard snapshot (upper bound). */
   dashboardPropsLimit: number
+  /** Resident host service refresh interval (ms). */
+  serviceRefreshMs: number
   /** Rolling size of the in-memory change buffer shown as "recent changes". */
   recentBufferSize: number
 }
@@ -51,6 +53,9 @@ export const Config: Schema<Config> = Schema.object({
   dashboardPropsLimit: Schema.number()
     .description('Devices whose props are fetched for a dashboard snapshot')
     .default(30),
+  serviceRefreshMs: Schema.number()
+    .description('Resident host service refresh interval (ms); homes/devices/props are mirrored in memory')
+    .default(20000),
   recentBufferSize: Schema.number()
     .description('Rolling size of the recent-change buffer')
     .default(50),
