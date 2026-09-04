@@ -10,13 +10,12 @@
  * manifest.
  */
 import { createElement, useEffect, useState, type ReactNode } from 'react'
-import type { Context } from '@deepseek-ai/cordis'
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+import type { Context, Context as ClientContext } from '@deepseek-ai/cordis'
 import { dashboardDefinition, type DashboardChatData } from './dashboard'
 import type { DashboardDevice, DashboardSnapshot } from '../dashboard'
 
 /** Required services: the conversation-node registry and the slots service. */
-export const inject = ['conversationEvents', 'slots']
+export const inject = ['uiConversation', 'slots']
 
 // ---------------------------------------------------------------------------
 // Theme (matches the DSH Web dark surface)
@@ -1048,7 +1047,7 @@ export function apply(ctx: ClientContext & Context): void {
     }, 'dsh-mihome.styles')
   }
 
-  ctx.conversationEvents.register(dashboardDefinition)
+  ctx.uiConversation.events.register(dashboardDefinition)
   ctx.slots.inject('conversation.chat.node', () => ctx.slots.register({
     name: 'conversation.chat.node',
     key: 'mihome-dashboard',

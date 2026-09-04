@@ -13,8 +13,7 @@ import type {
   ConversationMatch,
   ConversationNodeContext,
   ConversationNodeDefinition,
-} from '@deepseek-ai/dsh-client-runtime/client'
-import type { ChatNodeViewProps } from '@deepseek-ai/dsh-client-ui-conversation/client'
+} from '@deepseek-ai/dsh-client-ui-conversation/client'
 import { DASHBOARD_META_KIND, type DashboardSnapshot } from '../dashboard'
 
 export interface DashboardState {
@@ -85,7 +84,3 @@ export const dashboardDefinition: ConversationNodeDefinition<DashboardState> = {
     }
   },
 }
-
-// Type-only presence: the slot map declaration lives in the conversation UI
-// package; keep it in the program so the slot registration below types.
-export type { ChatNodeViewProps }
